@@ -1,7 +1,8 @@
 "use client"
 
 import Link from "next/link"
-import { usePathname } from "next/navigation"
+import { usePathname, useRouter } from "next/navigation"
+import { signOut } from "next-auth/react"
 import {
     LayoutDashboard,
     Users,
@@ -27,6 +28,13 @@ const adminNavItems = [
 
 export function AdminSidebar() {
     const pathname = usePathname()
+    const router = useRouter()
+
+    const handleLogout = async () => {
+        await signOut({ redirect: false })
+        router.push("/auth/login")
+        router.refresh()
+    }
 
     return (
         <aside className="hidden lg:flex flex-col w-64 border-r bg-card h-screen sticky top-0 overflow-hidden">
@@ -63,7 +71,10 @@ export function AdminSidebar() {
             </nav>
 
             <div className="p-4 border-t">
-                <button className="flex items-center space-x-3 w-full px-3 py-2.5 rounded-xl text-sm font-medium text-destructive hover:bg-destructive/10 transition-colors group">
+                <button 
+                    onClick={handleLogout}
+                    className="flex items-center space-x-3 w-full px-3 py-2.5 rounded-xl text-sm font-medium text-destructive hover:bg-destructive/10 transition-colors group"
+                >
                     <LogOut className="h-5 w-5 group-hover:-translate-x-1 transition-transform" />
                     <span>Logout</span>
                 </button>
