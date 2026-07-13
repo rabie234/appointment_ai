@@ -1,65 +1,91 @@
 "use client"
 
-import { useState, useEffect } from "react"
-import { signIn } from "next-auth/react"
-import { useRouter, useSearchParams } from "next/navigation"
+import { useActionState } from "react"
+import { useFormStatus } from "react-dom"
+import { useSearchParams } from "next/navigation"
+import { Suspense } from "react"
 import Link from "next/link"
+import { login, type LoginState } from "../actions"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { HeartPulse, Loader2, CheckCircle2 } from "lucide-react"
 
-export default function LoginPage() {
-    const router = useRouter()
+function SubmitButton() {
+    const { pending } = useFormStatus()
+
+    return (
+        <Button type="submit" className="w-full h-11 shadow-lg shadow-blue-200" disabled={pending}>
+            {pending ? (
+                <>
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                    Signing in...
+                </>
+            ) : (
+                "Sign in"
+            )}
+        </Button>
+    )
+}
+
+function LoginForm() {
     const searchParams = useSearchParams()
-    const [email, setEmail] = useState("")
-    const [password, setPassword] = useState("")
-    const [error, setError] = useState("")
-    const [success, setSuccess] = useState("")
-    const [loading, setLoading] = useState(false)
+    const [state, formAction] = useActionState<LoginState, FormData>(login, {})
 
-    useEffect(() => {
-        if (searchParams.get("registered") === "true") {
-            setSuccess("Account created successfully! Please sign in.")
-        }
-    }, [searchParams])
+    const justRegistered = searchParams.get("registered") === "true"
+    const callbackUrl = searchParams.get("callbackUrl") ?? ""
 
-    const handleSubmit = async (e: React.FormEvent) => {
-        e.preventDefault()
-        setError("")
-        setLoading(true)
+    return (
+        <form action={formAction} className="space-y-4">
+            <input type="hidden" name="callbackUrl" value={callbackUrl} />
 
-        try {
-            const result = await signIn("credentials", {
-                email,
-                password,
-                redirect: false,
-            })
+            {justRegistered && !state.error && (
+                <div className="p-3 text-sm text-emerald-600 bg-emerald-50 border border-emerald-200 rounded-lg flex items-center gap-2">
+                    <CheckCircle2 className="h-4 w-4" />
+                    Account created successfully! Please sign in.
+                </div>
+            )}
+            {state.error && (
+                <div className="p-3 text-sm text-destructive bg-destructive/10 border border-destructive/20 rounded-lg">
+                    {state.error}
+                </div>
+            )}
 
-            if (result?.error) {
-                setError(result.error)
-                setLoading(false)
-                return
-            }
+            <div className="space-y-2">
+                <label htmlFor="email" className="text-sm font-medium">
+                    Email
+                </label>
+                <Input
+                    id="email"
+                    name="email"
+                    type="email"
+                    autoComplete="email"
+                    placeholder="name@example.com"
+                    required
+                    className="h-11"
+                />
+            </div>
+            <div className="space-y-2">
+                <label htmlFor="password" className="text-sm font-medium">
+                    Password
+                </label>
+                <Input
+                    id="password"
+                    name="password"
+                    type="password"
+                    autoComplete="current-password"
+                    placeholder="••••••••"
+                    required
+                    className="h-11"
+                />
+            </div>
 
-            if (result?.ok) {
-                // Fetch session to get user role and redirect accordingly
-                const sessionResponse = await fetch("/api/auth/session")
-                const session = await sessionResponse.json()
-                
-                if (session?.user?.role === "admin") {
-                    router.push("/admin/dashboard")
-                } else {
-                    router.push("/")
-                }
-                router.refresh()
-            }
-        } catch (err: any) {
-            setError(err.message || "An error occurred")
-            setLoading(false)
-        }
-    }
+            <SubmitButton />
+        </form>
+    )
+}
 
+export default function LoginPage() {
     return (
         <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-primary/5 via-background to-background p-4">
             <Card className="w-full max-w-md border-none shadow-xl bg-card/60 backdrop-blur-sm">
@@ -70,70 +96,15 @@ export default function LoginPage() {
                         </div>
                     </div>
                     <CardTitle className="text-2xl font-bold">Welcome back</CardTitle>
-                    <CardDescription>
-                        Sign in to your ClinicAI account
-                    </CardDescription>
+                    <CardDescription>Sign in to your ClinicAI account</CardDescription>
                 </CardHeader>
                 <CardContent>
-                    <form onSubmit={handleSubmit} className="space-y-4">
-                        {success && (
-                            <div className="p-3 text-sm text-emerald-600 bg-emerald-50 border border-emerald-200 rounded-lg flex items-center gap-2">
-                                <CheckCircle2 className="h-4 w-4" />
-                                {success}
-                            </div>
-                        )}
-                        {error && (
-                            <div className="p-3 text-sm text-destructive bg-destructive/10 border border-destructive/20 rounded-lg">
-                                {error}
-                            </div>
-                        )}
-                        <div className="space-y-2">
-                            <label htmlFor="email" className="text-sm font-medium">
-                                Email
-                            </label>
-                            <Input
-                                id="email"
-                                type="email"
-                                placeholder="name@example.com"
-                                value={email}
-                                onChange={(e) => setEmail(e.target.value)}
-                                required
-                                disabled={loading}
-                                className="h-11"
-                            />
-                        </div>
-                        <div className="space-y-2">
-                            <label htmlFor="password" className="text-sm font-medium">
-                                Password
-                            </label>
-                            <Input
-                                id="password"
-                                type="password"
-                                placeholder="••••••••"
-                                value={password}
-                                onChange={(e) => setPassword(e.target.value)}
-                                required
-                                disabled={loading}
-                                className="h-11"
-                            />
-                        </div>
-                        <Button
-                            type="submit"
-                            className="w-full h-11 shadow-lg shadow-blue-200"
-                            disabled={loading}
-                        >
-                            {loading ? (
-                                <>
-                                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                                    Signing in...
-                                </>
-                            ) : (
-                                "Sign in"
-                            )}
-                        </Button>
-                    </form>
+                    {/* useSearchParams needs a Suspense boundary during prerender. */}
+                    <Suspense fallback={<div className="h-64" />}>
+                        <LoginForm />
+                    </Suspense>
                     <div className="mt-4 text-center text-sm">
-                        <span className="text-muted-foreground">Don't have an account? </span>
+                        <span className="text-muted-foreground">Don&apos;t have an account? </span>
                         <Link href="/auth/register" className="text-primary font-medium hover:underline">
                             Sign up
                         </Link>

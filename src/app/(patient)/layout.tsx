@@ -1,13 +1,17 @@
 import { PatientNavbar } from "@/components/layout/patient-navbar"
+import { requireRole } from "@/lib/session"
 
-export default function PatientLayout({
+export default async function PatientLayout({
     children,
 }: {
     children: React.ReactNode
 }) {
+    // Covers "/" too — the home page lives in this group and is NOT public.
+    const session = await requireRole("patient")
+
     return (
         <div className="relative min-h-screen flex flex-col bg-background">
-            <PatientNavbar />
+            <PatientNavbar user={session.user} />
             <main className="flex-1 container mx-auto px-4 sm:px-6 lg:px-8 py-8">
                 <div className="max-w-7xl mx-auto">
                     {children}

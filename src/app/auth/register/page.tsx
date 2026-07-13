@@ -1,78 +1,40 @@
 "use client"
 
-import { useState } from "react"
-import { useRouter } from "next/navigation"
+import { useActionState } from "react"
+import { useFormStatus } from "react-dom"
 import Link from "next/link"
+import { register, type RegisterState } from "../actions"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { HeartPulse, Loader2 } from "lucide-react"
 
+const fields = [
+    { id: "name", label: "Full Name", type: "text", placeholder: "John Doe", autoComplete: "name" },
+    { id: "email", label: "Email", type: "email", placeholder: "name@example.com", autoComplete: "email" },
+    { id: "password", label: "Password", type: "password", placeholder: "••••••••", autoComplete: "new-password" },
+    { id: "confirmPassword", label: "Confirm Password", type: "password", placeholder: "••••••••", autoComplete: "new-password" },
+] as const
+
+function SubmitButton() {
+    const { pending } = useFormStatus()
+
+    return (
+        <Button type="submit" className="w-full h-11 shadow-lg shadow-blue-200" disabled={pending}>
+            {pending ? (
+                <>
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                    Creating account...
+                </>
+            ) : (
+                "Sign up"
+            )}
+        </Button>
+    )
+}
+
 export default function RegisterPage() {
-    const router = useRouter()
-    const [formData, setFormData] = useState({
-        name: "",
-        email: "",
-        password: "",
-        confirmPassword: "",
-    })
-    const [error, setError] = useState("")
-    const [loading, setLoading] = useState(false)
-
-    const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-        setFormData({
-            ...formData,
-            [e.target.name]: e.target.value,
-        })
-        setError("")
-    }
-
-    const handleSubmit = async (e: React.FormEvent) => {
-        e.preventDefault()
-        setError("")
-
-        // Validation
-        if (formData.password !== formData.confirmPassword) {
-            setError("Passwords do not match")
-            return
-        }
-
-        if (formData.password.length < 6) {
-            setError("Password must be at least 6 characters")
-            return
-        }
-
-        setLoading(true)
-
-        try {
-            const response = await fetch("/api/auth/register", {
-                method: "POST",
-                headers: {
-                    "Content-Type": "application/json",
-                },
-                body: JSON.stringify({
-                    name: formData.name,
-                    email: formData.email,
-                    password: formData.password,
-                    role: "patient",
-                }),
-            })
-
-            const data = await response.json()
-
-            if (!response.ok) {
-                setError(data.error || "Registration failed")
-                setLoading(false)
-                return
-            }
-
-            // Redirect to login page
-            router.push("/auth/login?registered=true")
-        } catch (err: any) {
-            setError(err.message || "An error occurred")
-            setLoading(false)
-        }
-    }
+    const [state, formAction] = useActionState<RegisterState, FormData>(register, {})
 
     return (
         <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-primary/5 via-background to-background p-4">
@@ -84,95 +46,34 @@ export default function RegisterPage() {
                         </div>
                     </div>
                     <CardTitle className="text-2xl font-bold">Create an account</CardTitle>
-                    <CardDescription>
-                        Sign up to get started with ClinicAI
-                    </CardDescription>
+                    <CardDescription>Sign up to get started with ClinicAI</CardDescription>
                 </CardHeader>
                 <CardContent>
-                    <form onSubmit={handleSubmit} className="space-y-4">
-                        {error && (
+                    <form action={formAction} className="space-y-4">
+                        {state.error && (
                             <div className="p-3 text-sm text-destructive bg-destructive/10 border border-destructive/20 rounded-lg">
-                                {error}
+                                {state.error}
                             </div>
                         )}
-                        <div className="space-y-2">
-                            <label htmlFor="name" className="text-sm font-medium">
-                                Full Name
-                            </label>
-                            <Input
-                                id="name"
-                                name="name"
-                                type="text"
-                                placeholder="John Doe"
-                                value={formData.name}
-                                onChange={handleChange}
-                                required
-                                disabled={loading}
-                                className="h-11"
-                            />
-                        </div>
-                        <div className="space-y-2">
-                            <label htmlFor="email" className="text-sm font-medium">
-                                Email
-                            </label>
-                            <Input
-                                id="email"
-                                name="email"
-                                type="email"
-                                placeholder="name@example.com"
-                                value={formData.email}
-                                onChange={handleChange}
-                                required
-                                disabled={loading}
-                                className="h-11"
-                            />
-                        </div>
-                        <div className="space-y-2">
-                            <label htmlFor="password" className="text-sm font-medium">
-                                Password
-                            </label>
-                            <Input
-                                id="password"
-                                name="password"
-                                type="password"
-                                placeholder="••••••••"
-                                value={formData.password}
-                                onChange={handleChange}
-                                required
-                                disabled={loading}
-                                className="h-11"
-                            />
-                        </div>
-                        <div className="space-y-2">
-                            <label htmlFor="confirmPassword" className="text-sm font-medium">
-                                Confirm Password
-                            </label>
-                            <Input
-                                id="confirmPassword"
-                                name="confirmPassword"
-                                type="password"
-                                placeholder="••••••••"
-                                value={formData.confirmPassword}
-                                onChange={handleChange}
-                                required
-                                disabled={loading}
-                                className="h-11"
-                            />
-                        </div>
-                        <Button
-                            type="submit"
-                            className="w-full h-11 shadow-lg shadow-blue-200"
-                            disabled={loading}
-                        >
-                            {loading ? (
-                                <>
-                                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                                    Creating account...
-                                </>
-                            ) : (
-                                "Sign up"
-                            )}
-                        </Button>
+
+                        {fields.map((field) => (
+                            <div key={field.id} className="space-y-2">
+                                <label htmlFor={field.id} className="text-sm font-medium">
+                                    {field.label}
+                                </label>
+                                <Input
+                                    id={field.id}
+                                    name={field.id}
+                                    type={field.type}
+                                    autoComplete={field.autoComplete}
+                                    placeholder={field.placeholder}
+                                    required
+                                    className="h-11"
+                                />
+                            </div>
+                        ))}
+
+                        <SubmitButton />
                     </form>
                     <div className="mt-4 text-center text-sm">
                         <span className="text-muted-foreground">Already have an account? </span>

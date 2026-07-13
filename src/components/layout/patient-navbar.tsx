@@ -1,11 +1,12 @@
 "use client"
 
 import Link from "next/link"
-import { usePathname, useRouter } from "next/navigation"
-import { signOut, useSession } from "next-auth/react"
+import { usePathname } from "next/navigation"
+import type { Session } from "next-auth"
 import { Button } from "@/components/ui/button"
-import { Home, Users, Calendar, MessageSquare, Menu, X, HeartPulse, LogOut } from "lucide-react"
+import { Home, Users, Calendar, MessageSquare, Menu, X, HeartPulse, User } from "lucide-react"
 import { useState } from "react"
+import { LogoutButton } from "./logout-button"
 import { cn } from "@/lib/utils"
 
 const navItems = [
@@ -15,18 +16,10 @@ const navItems = [
     { name: "AI Chat", href: "/ai-chat", icon: MessageSquare },
 ]
 
-export function PatientNavbar() {
+export function PatientNavbar({ user }: { user: Session["user"] }) {
     const pathname = usePathname()
-    const router = useRouter()
-    const { data: session } = useSession()
     const [isOpen, setIsOpen] = useState(false)
     const [showProfileMenu, setShowProfileMenu] = useState(false)
-
-    const handleLogout = async () => {
-        await signOut({ redirect: false })
-        router.push("/auth/login")
-        router.refresh()
-    }
 
     return (
         <nav className="sticky top-0 z-50 w-full border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
@@ -64,31 +57,23 @@ export function PatientNavbar() {
                                 )
                             })}
                             <div className="ml-4 flex items-center space-x-2 border-l pl-4 relative">
-                                <Button 
-                                    variant="ghost" 
-                                    size="sm" 
-                                    className="relative h-8 w-8 rounded-full bg-muted"
+                                <Button
+                                    variant="ghost"
+                                    size="sm"
+                                    aria-label="Account menu"
+                                    aria-expanded={showProfileMenu}
+                                    className="relative h-8 w-8 rounded-full bg-muted p-0"
                                     onClick={() => setShowProfileMenu(!showProfileMenu)}
                                 >
-                                    <img
-                                        src="https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?q=80&w=100&auto=format&fit=crop"
-                                        alt="Profile"
-                                        className="rounded-full"
-                                    />
+                                    <User className="h-4 w-4 text-primary" />
                                 </Button>
                                 {showProfileMenu && (
-                                    <div className="absolute right-0 top-full mt-2 w-48 bg-card border rounded-lg shadow-lg z-50">
+                                    <div className="absolute right-0 top-full mt-2 w-48 bg-card border rounded-lg shadow-lg z-50 overflow-hidden">
                                         <div className="p-3 border-b">
-                                            <p className="text-sm font-semibold">{session?.user?.name}</p>
-                                            <p className="text-xs text-muted-foreground">{session?.user?.email}</p>
+                                            <p className="text-sm font-semibold truncate">{user.name}</p>
+                                            <p className="text-xs text-muted-foreground truncate">{user.email}</p>
                                         </div>
-                                        <button
-                                            onClick={handleLogout}
-                                            className="w-full flex items-center space-x-2 px-3 py-2 text-sm text-destructive hover:bg-destructive/10 transition-colors"
-                                        >
-                                            <LogOut className="h-4 w-4" />
-                                            <span>Logout</span>
-                                        </button>
+                                        <LogoutButton className="w-full px-3 py-2" />
                                     </div>
                                 )}
                             </div>
@@ -133,6 +118,14 @@ export function PatientNavbar() {
                                 </Link>
                             )
                         })}
+
+                        <div className="mt-2 border-t pt-2">
+                            <div className="px-3 py-2">
+                                <p className="text-sm font-semibold truncate">{user.name}</p>
+                                <p className="text-xs text-muted-foreground truncate">{user.email}</p>
+                            </div>
+                            <LogoutButton className="w-full px-3 py-2 rounded-md" />
+                        </div>
                     </div>
                 </div>
             )}

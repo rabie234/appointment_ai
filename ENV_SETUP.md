@@ -49,3 +49,34 @@ NEXTAUTH_SECRET=abc123xyz456def789ghi012jkl345mno678pqr901stu234vwx567yz890
 ```
 
 **Important:** Never commit `.env.local` to version control. It's already in `.gitignore`.
+
+## Creating an Admin Account
+
+Admins **cannot** be created through the public signup form — `/api/auth/register`
+always creates a `patient`, and ignores any `role` sent in the request body.
+This is deliberate: accepting a client-supplied role would let anyone POST
+`{"role":"admin"}` and grant themselves the admin panel.
+
+Create (or promote) an admin with the seed script:
+
+```bash
+ADMIN_EMAIL=admin@clinic.com \
+ADMIN_PASSWORD=your-strong-password \
+ADMIN_NAME="Clinic Admin" \
+npm run seed:admin
+```
+
+The script is safe to re-run: if the email already exists it promotes that user
+to `admin` and resets their password.
+
+## Roles and Routing
+
+| Role      | Home page          | Can access                                  |
+|-----------|--------------------|---------------------------------------------|
+| `patient` | `/`                | `/`, `/doctors`, `/appointments`, `/ai-chat` |
+| `admin`   | `/admin/dashboard` | `/admin/*`                                   |
+
+The two areas are strictly separated — an admin visiting a patient route is
+redirected to `/admin/dashboard`, and a patient visiting `/admin/*` is
+redirected to `/`. Signed-out users are redirected to `/auth/login` with a
+`callbackUrl` so they land on their intended page after signing in.
