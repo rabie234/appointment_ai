@@ -1,4 +1,5 @@
 import mongoose, { Schema, Document, Model } from 'mongoose';
+import { type DayHours, defaultWeek } from '@/lib/schedule';
 
 export interface IDoctor extends Document {
   name: string;
@@ -11,10 +12,9 @@ export interface IDoctor extends Document {
   experience: string;
   successRate: number;
   totalPatients: number;
-  workingHours: {
-    day: string;
-    hours: string;
-  }[];
+  // The doctor's weekly availability *within* the clinic. `closed` on a day
+  // means the doctor is off that day. Kept within clinic hours at write time.
+  schedule: DayHours[];
   status: 'active' | 'inactive';
   availability: 'available' | 'on-leave';
   joinedDate: Date;
@@ -72,12 +72,20 @@ const DoctorSchema = new Schema<IDoctor>(
       type: Number,
       default: 0,
     },
-    workingHours: [
-      {
-        day: String,
-        hours: String,
-      },
-    ],
+    schedule: {
+      type: [
+        new Schema<DayHours>(
+          {
+            day: { type: String, required: true },
+            open: { type: String, default: '09:00' },
+            close: { type: String, default: '17:00' },
+            closed: { type: Boolean, default: false },
+          },
+          { _id: false }
+        ),
+      ],
+      default: defaultWeek,
+    },
     status: {
       type: String,
       enum: ['active', 'inactive'],
