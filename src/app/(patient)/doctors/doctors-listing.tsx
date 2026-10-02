@@ -47,18 +47,18 @@ export function DoctorsListing({
             <div className="flex flex-col md:flex-row md:items-center justify-between gap-6">
                 <div>
                     <h1 className="text-3xl font-bold tracking-tight">Find a Doctor</h1>
-                    <p className="text-muted-foreground mt-1">Book an appointment with our world-class specialists.</p>
+                    <p className="text-muted-foreground mt-1">
+                        {filtered.length} {filtered.length === 1 ? "specialist" : "specialists"} available to book.
+                    </p>
                 </div>
-                <div className="flex items-center gap-2">
-                    <div className="relative w-full md:w-64">
-                        <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-                        <Input
-                            placeholder="Search name..."
-                            className="pl-10"
-                            value={search}
-                            onChange={(e) => setSearch(e.target.value)}
-                        />
-                    </div>
+                <div className="relative w-full md:w-72">
+                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                    <Input
+                        placeholder="Search by name…"
+                        className="pl-10 bg-card border-none shadow-sm"
+                        value={search}
+                        onChange={(e) => setSearch(e.target.value)}
+                    />
                 </div>
             </div>
 
@@ -111,7 +111,7 @@ export function DoctorsListing({
                     ) : (
                         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                             {filtered.map((doctor) => (
-                                <Card key={doctor.id} className="group hover:shadow-lg transition-all duration-300 border-none bg-card/60 overflow-hidden">
+                                <Card key={doctor.id} className="group hover:shadow-lg hover:-translate-y-0.5 transition-all duration-300 border-none bg-card/60 overflow-hidden">
                                     <div className="flex flex-col sm:flex-row h-full">
                                         <div className="relative w-full sm:w-40 aspect-square sm:aspect-auto bg-muted flex items-center justify-center">
                                             {doctor.image ? (

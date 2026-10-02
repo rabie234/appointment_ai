@@ -11,6 +11,7 @@ import {
     MapPin,
     User,
     Video,
+    Plus,
 } from "lucide-react"
 import { cn } from "@/lib/utils"
 
@@ -33,6 +34,7 @@ export function AppointmentsList({ appointments }: { appointments: AppointmentCa
     const [activeTab, setActiveTab] = useState<(typeof TABS)[number]>("Upcoming")
 
     const filtered = appointments.filter((a) => a.tab === activeTab)
+    const countFor = (tab: (typeof TABS)[number]) => appointments.filter((a) => a.tab === tab).length
 
     return (
         <div className="space-y-8 animate-in fade-in duration-500">
@@ -42,23 +44,29 @@ export function AppointmentsList({ appointments }: { appointments: AppointmentCa
                     <p className="text-muted-foreground mt-1">Manage and track your medical visits.</p>
                 </div>
                 <Link href="/doctors">
-                    <Button className="shadow-lg shadow-blue-100">Book New Appointment</Button>
+                    <Button className="shadow-lg shadow-blue-100 gap-2">
+                        <Plus className="h-4 w-4" />
+                        Book New Appointment
+                    </Button>
                 </Link>
             </div>
 
-            <div className="flex bg-card/60 p-1 rounded-xl border border-none shadow-sm w-fit">
+            <div className="flex bg-card/60 p-1 rounded-xl border-none shadow-sm w-fit">
                 {TABS.map((tab) => (
                     <button
                         key={tab}
                         onClick={() => setActiveTab(tab)}
                         className={cn(
-                            "px-6 py-2 rounded-lg text-sm font-medium transition-all",
+                            "px-5 py-2 rounded-lg text-sm font-medium transition-all",
                             activeTab === tab
                                 ? "bg-primary text-primary-foreground shadow-md"
                                 : "text-muted-foreground hover:text-foreground"
                         )}
                     >
                         {tab}
+                        <span className={cn("ml-2 text-xs", activeTab === tab ? "opacity-80" : "opacity-60")}>
+                            {countFor(tab)}
+                        </span>
                     </button>
                 ))}
             </div>

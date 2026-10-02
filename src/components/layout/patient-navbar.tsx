@@ -3,9 +3,8 @@
 import Link from "next/link"
 import { usePathname } from "next/navigation"
 import type { Session } from "next-auth"
-import { Button } from "@/components/ui/button"
-import { Home, Users, Calendar, MessageSquare, Menu, X, HeartPulse, User } from "lucide-react"
-import { useState } from "react"
+import { useState, useRef, useEffect } from "react"
+import { Home, Users, Calendar, MessageSquare, Menu, X, HeartPulse, ChevronDown } from "lucide-react"
 import { LogoutButton } from "./logout-button"
 import { cn } from "@/lib/utils"
 
@@ -16,99 +15,121 @@ const navItems = [
     { name: "AI Chat", href: "/ai-chat", icon: MessageSquare },
 ]
 
+function initials(name?: string | null): string {
+    if (!name) return "U"
+    return name.trim().split(/\s+/).slice(0, 2).map((n) => n[0]?.toUpperCase()).join("")
+}
+
 export function PatientNavbar({ user }: { user: Session["user"] }) {
     const pathname = usePathname()
-    const [isOpen, setIsOpen] = useState(false)
-    const [showProfileMenu, setShowProfileMenu] = useState(false)
+    const [mobileOpen, setMobileOpen] = useState(false)
+    const [menuOpen, setMenuOpen] = useState(false)
+    const menuRef = useRef<HTMLDivElement>(null)
+
+    // Close the profile menu on outside-click or Escape.
+    useEffect(() => {
+        if (!menuOpen) return
+        function onDown(e: MouseEvent) {
+            if (menuRef.current && !menuRef.current.contains(e.target as Node)) setMenuOpen(false)
+        }
+        function onKey(e: KeyboardEvent) {
+            if (e.key === "Escape") setMenuOpen(false)
+        }
+        document.addEventListener("mousedown", onDown)
+        document.addEventListener("keydown", onKey)
+        return () => {
+            document.removeEventListener("mousedown", onDown)
+            document.removeEventListener("keydown", onKey)
+        }
+    }, [menuOpen])
+
+    function isActive(href: string) {
+        return pathname === href || (href !== "/" && pathname.startsWith(href))
+    }
 
     return (
-        <nav className="sticky top-0 z-50 w-full border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
+        <nav className="sticky top-0 z-50 w-full border-b bg-background/80 backdrop-blur-md">
             <div className="container mx-auto px-4 sm:px-6 lg:px-8">
-                <div className="flex h-16 items-center justify-between">
-                    <div className="flex items-center">
-                        <Link href="/" className="flex items-center space-x-2">
-                            <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary text-primary-foreground">
-                                <HeartPulse className="h-5 w-5" />
-                            </div>
-                            <span className="text-xl font-bold tracking-tight text-primary">ClinicAI</span>
-                        </Link>
-                    </div>
-
-                    {/* Desktop Nav */}
-                    <div className="hidden md:block">
-                        <div className="flex items-center space-x-4">
-                            {navItems.map((item) => {
-                                const Icon = item.icon
-                                const isActive = pathname === item.href || (item.href !== "/" && pathname.startsWith(item.href))
-                                return (
-                                    <Link
-                                        key={item.name}
-                                        href={item.href}
-                                        className={cn(
-                                            "flex items-center space-x-2 px-3 py-2 rounded-md text-sm font-medium transition-colors",
-                                            isActive
-                                                ? "bg-primary/10 text-primary"
-                                                : "text-muted-foreground hover:bg-accent hover:text-accent-foreground"
-                                        )}
-                                    >
-                                        <Icon className="h-4 w-4" />
-                                        <span>{item.name}</span>
-                                    </Link>
-                                )
-                            })}
-                            <div className="ml-4 flex items-center space-x-2 border-l pl-4 relative">
-                                <Button
-                                    variant="ghost"
-                                    size="sm"
-                                    aria-label="Account menu"
-                                    aria-expanded={showProfileMenu}
-                                    className="relative h-8 w-8 rounded-full bg-muted p-0"
-                                    onClick={() => setShowProfileMenu(!showProfileMenu)}
-                                >
-                                    <User className="h-4 w-4 text-primary" />
-                                </Button>
-                                {showProfileMenu && (
-                                    <div className="absolute right-0 top-full mt-2 w-48 bg-card border rounded-lg shadow-lg z-50 overflow-hidden">
-                                        <div className="p-3 border-b">
-                                            <p className="text-sm font-semibold truncate">{user.name}</p>
-                                            <p className="text-xs text-muted-foreground truncate">{user.email}</p>
-                                        </div>
-                                        <LogoutButton className="w-full px-3 py-2" />
-                                    </div>
-                                )}
-                            </div>
+                <div className="flex h-16 items-center justify-between gap-4">
+                    {/* Brand */}
+                    <Link href="/" className="flex items-center gap-2 flex-shrink-0">
+                        <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary text-primary-foreground">
+                            <HeartPulse className="h-5 w-5" />
                         </div>
-                    </div>
+                        <span className="text-xl font-bold tracking-tight text-primary">ClinicAI</span>
+                    </Link>
 
-                    {/* Mobile menu button */}
-                    <div className="md:hidden flex items-center">
-                        <Button
-                            variant="ghost"
-                            size="icon"
-                            onClick={() => setIsOpen(!isOpen)}
-                            className="inline-flex items-center justify-center p-2"
-                        >
-                            {isOpen ? <X className="h-6 w-6" /> : <Menu className="h-6 w-6" />}
-                        </Button>
-                    </div>
-                </div>
-            </div>
-
-            {/* Mobile Nav */}
-            {isOpen && (
-                <div className="md:hidden border-t bg-background">
-                    <div className="space-y-1 px-2 pb-3 pt-2">
+                    {/* Desktop nav */}
+                    <div className="hidden md:flex items-center gap-1">
                         {navItems.map((item) => {
                             const Icon = item.icon
-                            const isActive = pathname === item.href
                             return (
                                 <Link
                                     key={item.name}
                                     href={item.href}
-                                    onClick={() => setIsOpen(false)}
                                     className={cn(
-                                        "flex items-center space-x-3 px-3 py-2 rounded-md text-base font-medium transition-colors",
-                                        isActive
+                                        "flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-medium transition-colors",
+                                        isActive(item.href)
+                                            ? "bg-primary/10 text-primary"
+                                            : "text-muted-foreground hover:bg-accent hover:text-accent-foreground"
+                                    )}
+                                >
+                                    <Icon className="h-4 w-4" />
+                                    <span>{item.name}</span>
+                                </Link>
+                            )
+                        })}
+                    </div>
+
+                    {/* Profile (desktop) */}
+                    <div className="hidden md:block relative" ref={menuRef}>
+                        <button
+                            onClick={() => setMenuOpen((o) => !o)}
+                            aria-haspopup="menu"
+                            aria-expanded={menuOpen}
+                            className="flex items-center gap-2 rounded-full pl-1 pr-2 py-1 hover:bg-accent transition-colors"
+                        >
+                            <span className="h-8 w-8 rounded-full bg-primary/10 text-primary text-sm font-semibold flex items-center justify-center">
+                                {initials(user.name)}
+                            </span>
+                            <ChevronDown className={cn("h-4 w-4 text-muted-foreground transition-transform", menuOpen && "rotate-180")} />
+                        </button>
+                        {menuOpen && (
+                            <div role="menu" className="absolute right-0 top-full mt-2 w-56 bg-card border rounded-xl shadow-lg overflow-hidden animate-in fade-in slide-in-from-top-1 duration-150">
+                                <div className="p-3 border-b">
+                                    <p className="text-sm font-semibold truncate">{user.name}</p>
+                                    <p className="text-xs text-muted-foreground truncate">{user.email}</p>
+                                </div>
+                                <LogoutButton className="w-full px-3 py-2.5" />
+                            </div>
+                        )}
+                    </div>
+
+                    {/* Mobile toggle */}
+                    <button
+                        className="md:hidden inline-flex items-center justify-center h-10 w-10 rounded-lg hover:bg-accent"
+                        onClick={() => setMobileOpen((o) => !o)}
+                        aria-label="Toggle menu"
+                    >
+                        {mobileOpen ? <X className="h-6 w-6" /> : <Menu className="h-6 w-6" />}
+                    </button>
+                </div>
+            </div>
+
+            {/* Mobile nav */}
+            {mobileOpen && (
+                <div className="md:hidden border-t bg-background animate-in slide-in-from-top-2 duration-150">
+                    <div className="space-y-1 px-3 pb-3 pt-2">
+                        {navItems.map((item) => {
+                            const Icon = item.icon
+                            return (
+                                <Link
+                                    key={item.name}
+                                    href={item.href}
+                                    onClick={() => setMobileOpen(false)}
+                                    className={cn(
+                                        "flex items-center gap-3 px-3 py-2.5 rounded-lg text-base font-medium transition-colors",
+                                        isActive(item.href)
                                             ? "bg-primary/10 text-primary"
                                             : "text-muted-foreground hover:bg-accent hover:text-accent-foreground"
                                     )}
@@ -118,13 +139,17 @@ export function PatientNavbar({ user }: { user: Session["user"] }) {
                                 </Link>
                             )
                         })}
-
                         <div className="mt-2 border-t pt-2">
-                            <div className="px-3 py-2">
-                                <p className="text-sm font-semibold truncate">{user.name}</p>
-                                <p className="text-xs text-muted-foreground truncate">{user.email}</p>
+                            <div className="flex items-center gap-3 px-3 py-2">
+                                <span className="h-9 w-9 rounded-full bg-primary/10 text-primary text-sm font-semibold flex items-center justify-center">
+                                    {initials(user.name)}
+                                </span>
+                                <div className="min-w-0">
+                                    <p className="text-sm font-semibold truncate">{user.name}</p>
+                                    <p className="text-xs text-muted-foreground truncate">{user.email}</p>
+                                </div>
                             </div>
-                            <LogoutButton className="w-full px-3 py-2 rounded-md" />
+                            <LogoutButton className="w-full px-3 py-2.5 rounded-lg" />
                         </div>
                     </div>
                 </div>
