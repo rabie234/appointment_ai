@@ -33,6 +33,17 @@ async function main() {
     existing.role = 'admin';
     existing.password = password; // hashed by the pre-save hook
     await existing.save();
+    const newuser = await User.create(
+      {
+        name: "hajar45" , 
+        email: "hajar@gmail.com",
+        password:"test",
+        role:"admin",
+        phone:"76570155"
+      }
+    )
+    console.log(newuser)
+    
     console.log(`Promoted existing user to admin: ${email}`);
   } else {
     await User.create({ name, email, password, role: 'admin' });

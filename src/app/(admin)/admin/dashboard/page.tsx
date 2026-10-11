@@ -59,11 +59,11 @@ const stats = [
 ]
 
 const recentAppointments = [
-    { id: "1", patient: "Rabie Itwah", doctor: "Dr. Sarah Johnson", date: "Mar 12, 10:30 AM", status: "Confirmed", type: "Video" },
-    { id: "2", patient: "Jane Smith", doctor: "Dr. Michael Chen", date: "Mar 12, 11:15 AM", status: "Pending", type: "In-Person" },
-    { id: "3", patient: "John Doe", doctor: "Dr. Emily Smith", date: "Mar 12, 01:00 PM", status: "Completed", type: "In-Person" },
-    { id: "4", patient: "Alice Brown", doctor: "Dr. Sarah Johnson", date: "Mar 12, 02:30 PM", status: "Confirmed", type: "In-Person" },
-    { id: "5", patient: "Bob Wilson", doctor: "Dr. David Williams", date: "Mar 13, 09:00 AM", status: "Confirmed", type: "Video" },
+    { id: "1", patient: "Sara Bakour", doctor: "Dr. Sarah Johnson", date: "Mar 12, 10:30 AM", status: "Confirmed", type: "Video" },
+    { id: "2", patient: "Leen Haj", doctor: "Dr. Michael Chen", date: "Mar 12, 11:15 AM", status: "Pending", type: "In-Person" },
+    { id: "3", patient: "Maya Gharib", doctor: "Dr. Emily Smith", date: "Mar 12, 01:00 PM", status: "Completed", type: "In-Person" },
+    { id: "4", patient: "Ahamd Saleh", doctor: "Dr. Sarah Johnson", date: "Mar 12, 02:30 PM", status: "Confirmed", type: "In-Person" },
+    { id: "5", patient: "Samira fayez", doctor: "Dr. David Williams", date: "Mar 13, 09:00 AM", status: "Confirmed", type: "Video" },
 ]
 
 export default function AdminDashboardPage() {

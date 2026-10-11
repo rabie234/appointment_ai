@@ -41,6 +41,7 @@ const PROMPTS = [
     "I have chest pain when I exercise",
     "I need a skin rash checked",
     "Find me a pediatrician",
+    "i have head pain"
 ]
 
 function to12h(time: string): string {

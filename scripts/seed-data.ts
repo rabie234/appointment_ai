@@ -127,7 +127,7 @@ function doctorEmail(name: string): string {
 }
 
 const PATIENTS: { name: string; email: string }[] = [
-  { name: 'Rabie Itwah', email: 'rabie@patient.test' },
+  { name: 'hajar mm', email: 'hajar789@patient.test' },
   { name: 'Jane Smith', email: 'jane@patient.test' },
   { name: 'John Doe', email: 'john@patient.test' },
   { name: 'Alice Brown', email: 'alice@patient.test' },
