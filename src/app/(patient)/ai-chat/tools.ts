@@ -1,14 +1,17 @@
 import { Type, type FunctionDeclaration } from '@google/genai';
+import { isValidObjectId } from 'mongoose';
 import connectDB from '@/lib/mongodb';
-import { freeSlotsFor } from '@/lib/slots-server';
+import { freeSlotsFor, parseDay } from '@/lib/slots-server';
+import { CONSULTATION_FEE } from './chat-core';
 import Doctor from '@/models/Doctor';
 import Specialty from '@/models/Specialty';
+import Appointment from '@/models/Appointment';
 
 /**
- * The tools the AI assistant can call. All are READ-ONLY — they let the model
- * look up the clinic's real doctors, specialties, and live availability instead
- * of inventing them. Booking itself is never done here; the model proposes, the
- * patient confirms on the booking page.
+ * The tools the AI assistant can call. Most are READ-ONLY — they look up the
+ * clinic's real doctors, specialties, and live availability. `confirm_booking`
+ * is the one write: it creates an appointment, but only after the patient has
+ * explicitly confirmed (the UI gates this behind a Confirm button).
  */
 
 // ── Function declarations (what the model sees) ─────────────────────────────
@@ -55,14 +58,37 @@ export const functionDeclarations: FunctionDeclaration[] = [
     name: 'propose_booking',
     description:
       'Call this once you have settled on a specific doctor, date and free time to recommend ' +
-      'to the patient. It records a structured suggestion the UI turns into a booking link. ' +
-      'Only use a doctorId/date/time you obtained from the other tools.',
+      'to the patient. It records a structured suggestion the UI shows with a "Confirm booking" ' +
+      'button. Do NOT book yet — wait for the patient to confirm. Only use a doctorId/date/time ' +
+      'you obtained from the other tools.',
     parameters: {
       type: Type.OBJECT,
       properties: {
         doctorId: { type: Type.STRING, description: 'The recommended doctor id.' },
         date: { type: Type.STRING, description: 'Recommended date, YYYY-MM-DD.' },
         time: { type: Type.STRING, description: 'Recommended free slot, 24h HH:MM.' },
+      },
+      required: ['doctorId', 'date', 'time'],
+    },
+  },
+  {
+    name: 'confirm_booking',
+    description:
+      'Actually create the appointment in the system. Call this ONLY after the patient has ' +
+      'explicitly confirmed a specific doctor, date and time (e.g. they clicked Confirm or said ' +
+      '"yes, book it"). If the slot is no longer free, this returns booked:false with a reason ' +
+      'and a list of alternative free times — tell the patient that slot is unavailable and ' +
+      'offer one of the alternatives.',
+    parameters: {
+      type: Type.OBJECT,
+      properties: {
+        doctorId: { type: Type.STRING, description: 'The doctor id to book.' },
+        date: { type: Type.STRING, description: 'Date to book, YYYY-MM-DD.' },
+        time: { type: Type.STRING, description: 'Slot to book, 24h HH:MM.' },
+        type: {
+          type: Type.STRING,
+          description: 'Visit type: "in-person" (default) or "video".',
+        },
       },
       required: ['doctorId', 'date', 'time'],
     },
@@ -162,15 +188,104 @@ async function proposeBooking(args: { doctorId?: string; date?: string; time?: s
   return { ok: true, suggestion };
 }
 
+export type BookingConfirmation = {
+  appointmentId: string;
+  doctorName: string;
+  specialty: string;
+  date: string;
+  time: string;
+  type: 'in-person' | 'video';
+};
+
 /**
- * Dispatch a model function call by name. Returns `{ result, suggestion? }` —
- * `suggestion` is set only by a successful propose_booking, and the caller
- * lifts it onto the final action response.
+ * Create the appointment. Re-validates everything server-side and guards the
+ * slot right before insert. On conflict (slot taken, or doctor not available
+ * then) it returns booked:false with the reason and the remaining free times so
+ * the assistant can offer an alternative instead of failing.
+ */
+async function confirmBooking(
+  patientId: string,
+  args: { doctorId?: string; date?: string; time?: string; type?: string }
+) {
+  const doctorId = String(args.doctorId ?? '');
+  const date = String(args.date ?? '');
+  const time = String(args.time ?? '');
+  const type = String(args.type ?? 'in-person') === 'video' ? 'video' : 'in-person';
+
+  if (!isValidObjectId(doctorId) || !date || !time) {
+    return { booked: false, reason: 'doctorId, date and time are required' };
+  }
+
+  const day = parseDay(date);
+  if (!day) return { booked: false, reason: 'Invalid date' };
+
+  const today = new Date();
+  today.setUTCHours(0, 0, 0, 0);
+  if (day < today) return { booked: false, reason: 'That date has already passed' };
+
+  await connectDB();
+
+  const doctor = await Doctor.findById(doctorId).select('name specialty status').lean();
+  if (!doctor || doctor.status !== 'active') {
+    return { booked: false, reason: 'That doctor is not available' };
+  }
+
+  // The source of truth for "is this slot bookable right now".
+  const { slots, error } = await freeSlotsFor(doctorId, date);
+  if (error) return { booked: false, reason: error };
+
+  if (!slots?.includes(time)) {
+    // Conflict — the slot is gone (or never existed). Offer what's still free.
+    return {
+      booked: false,
+      reason: `${doctor.name} is not available on ${date} at ${time}.`,
+      alternatives: slots ?? [],
+    };
+  }
+
+  try {
+    const appt = await Appointment.create({
+      patient: patientId,
+      doctor: doctorId,
+      date: day,
+      time,
+      type,
+      status: 'pending',
+      price: CONSULTATION_FEE,
+    });
+
+    const confirmation: BookingConfirmation = {
+      appointmentId: String(appt._id),
+      doctorName: doctor.name,
+      specialty: doctor.specialty,
+      date,
+      time,
+      type,
+    };
+    return { booked: true, confirmation };
+  } catch (err) {
+    console.error('confirm_booking failed:', err);
+    return { booked: false, reason: 'Could not create the appointment. Please try again.' };
+  }
+}
+
+/**
+ * Dispatch a model function call by name. Returns the tool result to feed back
+ * to the model, plus (when applicable) a `suggestion` or a `confirmation` that
+ * the caller lifts onto the stream so the UI can render the Book/Booked card.
+ *
+ * `patientId` is required by confirm_booking to own the created appointment; it
+ * comes from the authenticated session, never from the model.
  */
 export async function runTool(
   name: string,
-  args: Record<string, unknown>
-): Promise<{ result: unknown; suggestion?: BookingSuggestion }> {
+  args: Record<string, unknown>,
+  patientId: string
+): Promise<{
+  result: unknown;
+  suggestion?: BookingSuggestion;
+  confirmation?: BookingConfirmation;
+}> {
   switch (name) {
     case 'list_specialties':
       return { result: await listSpecialties() };
@@ -180,9 +295,14 @@ export async function runTool(
       return { result: await getAvailableSlots(args) };
     case 'propose_booking': {
       const res = await proposeBooking(args);
-      // Hand the confirmed suggestion up; still return the outcome to the model.
       return res.ok
         ? { result: { ok: true }, suggestion: res.suggestion }
+        : { result: res };
+    }
+    case 'confirm_booking': {
+      const res = await confirmBooking(patientId, args);
+      return res.booked
+        ? { result: { booked: true }, confirmation: res.confirmation }
         : { result: res };
     }
     default:

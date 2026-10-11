@@ -145,6 +145,13 @@ export function dayOfWeek(date: Date): Day {
   return map[date.getDay()];
 }
 
+/** The end time of a slot that starts at "HH:MM" and lasts `step` minutes. */
+export function slotEnd(start: string, step: number = SLOT_MINUTES): string {
+  const mins = toMinutes(start);
+  if (Number.isNaN(mins)) return start;
+  return minutesToTime(mins + step);
+}
+
 export function minutesToTime(total: number): string {
   const h = Math.floor(total / 60);
   const m = total % 60;

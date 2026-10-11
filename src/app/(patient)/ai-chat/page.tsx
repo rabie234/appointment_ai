@@ -16,9 +16,12 @@ import {
     Stethoscope,
     Trash2,
     Sparkles,
+    CheckCircle2,
+    Video,
+    MapPin,
 } from "lucide-react"
 import { cn } from "@/lib/utils"
-import type { BookingSuggestion } from "./tools"
+import type { BookingSuggestion, BookingConfirmation } from "./tools"
 import {
     listConversations,
     getConversation,
@@ -31,6 +34,7 @@ type Message = {
     role: "user" | "model"
     content: string
     suggestion?: BookingSuggestion
+    confirmation?: BookingConfirmation
     streaming?: boolean
 }
 
@@ -122,23 +126,24 @@ export default function AIChatPage() {
         refreshConversations()
     }
 
-    async function handleSend() {
-        const text = input.trim()
-        if (!text || busy) return
+    /** Send `text` to the AI and stream the reply. Used by the composer and the
+     *  Confirm-booking button alike. */
+    async function sendMessage(text: string) {
+        const trimmed = text.trim()
+        if (!trimmed || busy) return
 
         const history = messages.map((m) => ({ role: m.role, text: m.content }))
-        const userMsg: Message = { id: `u-${Date.now()}`, role: "user", content: text }
+        const userMsg: Message = { id: `u-${Date.now()}`, role: "user", content: trimmed }
         const modelMsg: Message = { id: `m-${Date.now()}`, role: "model", content: "", streaming: true }
 
         setMessages((prev) => [...prev, userMsg, modelMsg])
-        setInput("")
         setBusy(true)
 
         try {
             const res = await fetch("/api/ai-chat", {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ message: text, history, conversationId: activeId }),
+                body: JSON.stringify({ message: trimmed, history, conversationId: activeId }),
             })
             if (!res.ok || !res.body) throw new Error("request failed")
 
@@ -175,12 +180,35 @@ export default function AIChatPage() {
         }
     }
 
-    function handleEvent(evt: { type: string; text?: string; data?: BookingSuggestion; conversationId?: string; message?: string }, modelId: string) {
+    function handleSend() {
+        const text = input.trim()
+        if (!text) return
+        setInput("")
+        sendMessage(text)
+    }
+
+    /** The patient clicked "Confirm booking" on a suggestion card. */
+    function confirmBooking(s: BookingSuggestion) {
+        sendMessage(`Yes, please book the appointment with ${s.doctorName} on ${s.date} at ${s.time}.`)
+    }
+
+    function handleEvent(
+        evt: {
+            type: string
+            text?: string
+            data?: BookingSuggestion & BookingConfirmation
+            conversationId?: string
+            message?: string
+        },
+        modelId: string
+    ) {
         setMessages((prev) =>
             prev.map((m) => {
                 if (m.id !== modelId) return m
                 if (evt.type === "delta") return { ...m, content: m.content + (evt.text ?? "") }
-                if (evt.type === "suggestion") return { ...m, suggestion: evt.data }
+                if (evt.type === "suggestion") return { ...m, suggestion: evt.data as BookingSuggestion }
+                // A real booking happened — clear any pending suggestion card.
+                if (evt.type === "booked") return { ...m, confirmation: evt.data as BookingConfirmation, suggestion: undefined }
                 if (evt.type === "error") return { ...m, content: evt.message ?? "Error", streaming: false }
                 return m
             })
@@ -264,7 +292,9 @@ export default function AIChatPage() {
                     {isEmpty ? (
                         <EmptyState onPick={(p) => setInput(p)} />
                     ) : (
-                        messages.map((m) => <Bubble key={m.id} message={m} />)
+                        messages.map((m) => (
+                            <Bubble key={m.id} message={m} onConfirm={confirmBooking} busy={busy} />
+                        ))
                     )}
                 </div>
 
@@ -300,7 +330,15 @@ export default function AIChatPage() {
     )
 }
 
-function Bubble({ message }: { message: Message }) {
+function Bubble({
+    message,
+    onConfirm,
+    busy,
+}: {
+    message: Message
+    onConfirm: (s: BookingSuggestion) => void
+    busy: boolean
+}) {
     const isUser = message.role === "user"
     return (
         <div className={cn("flex items-start gap-3 max-w-[90%] md:max-w-[75%]", isUser ? "ml-auto flex-row-reverse" : "mr-auto")}>
@@ -324,13 +362,25 @@ function Bubble({ message }: { message: Message }) {
                     </span>
                 ) : null}
 
-                {message.suggestion && <SuggestionCard s={message.suggestion} />}
+                {message.confirmation ? (
+                    <BookedCard c={message.confirmation} />
+                ) : message.suggestion ? (
+                    <SuggestionCard s={message.suggestion} onConfirm={onConfirm} busy={busy} />
+                ) : null}
             </div>
         </div>
     )
 }
 
-function SuggestionCard({ s }: { s: BookingSuggestion }) {
+function SuggestionCard({
+    s,
+    onConfirm,
+    busy,
+}: {
+    s: BookingSuggestion
+    onConfirm: (s: BookingSuggestion) => void
+    busy: boolean
+}) {
     return (
         <div className="mt-3 rounded-xl border bg-background p-3 space-y-2 text-card-foreground">
             <div className="flex items-center gap-2 text-sm font-semibold">
@@ -342,8 +392,42 @@ function SuggestionCard({ s }: { s: BookingSuggestion }) {
                 <CalendarCheck className="h-3.5 w-3.5 text-primary" />
                 {prettyDate(s.date)} · {to12h(s.time)}
             </div>
-            <Link href={`/doctors/${s.doctorId}`}>
-                <Button size="sm" className="w-full mt-1 shadow-md shadow-blue-100">Book this slot</Button>
+            <div className="flex gap-2 mt-1">
+                <Button
+                    size="sm"
+                    className="flex-1 shadow-md shadow-blue-100"
+                    disabled={busy}
+                    onClick={() => onConfirm(s)}
+                >
+                    Confirm booking
+                </Button>
+                <Link href={`/doctors/${s.doctorId}`} className="flex-shrink-0">
+                    <Button size="sm" variant="outline" disabled={busy}>Details</Button>
+                </Link>
+            </div>
+        </div>
+    )
+}
+
+function BookedCard({ c }: { c: BookingConfirmation }) {
+    return (
+        <div className="mt-3 rounded-xl border border-emerald-200 bg-emerald-50 dark:bg-emerald-900/20 dark:border-emerald-900/40 p-3 space-y-2">
+            <div className="flex items-center gap-2 text-sm font-semibold text-emerald-700 dark:text-emerald-400">
+                <CheckCircle2 className="h-4 w-4" />
+                Appointment booked
+            </div>
+            <p className="text-sm font-medium">{c.doctorName}</p>
+            <p className="text-xs text-primary font-medium">{c.specialty}</p>
+            <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-muted-foreground">
+                <span className="flex items-center gap-1.5"><CalendarCheck className="h-3.5 w-3.5 text-emerald-600" /> {prettyDate(c.date)} · {to12h(c.time)}</span>
+                <span className="flex items-center gap-1.5">
+                    {c.type === "video" ? <Video className="h-3.5 w-3.5 text-blue-500" /> : <MapPin className="h-3.5 w-3.5 text-orange-500" />}
+                    {c.type === "video" ? "Video call" : "In-person"}
+                </span>
+            </div>
+            <p className="text-[11px] text-muted-foreground">Pending the clinic&apos;s confirmation.</p>
+            <Link href="/appointments">
+                <Button size="sm" variant="outline" className="w-full mt-1">View my appointments</Button>
             </Link>
         </div>
     )
