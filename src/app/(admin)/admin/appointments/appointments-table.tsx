@@ -22,9 +22,13 @@ import {
     CheckCheck,
     Loader2,
     Plus,
+    PlayCircle,
+    LogIn,
+    LogOut,
 } from "lucide-react"
 import {
     confirmAppointment,
+    startAppointment,
     completeAppointment,
     cancelAppointment,
     adminCreateAppointment,
@@ -41,16 +45,22 @@ export type AdminAppointment = {
     doctor: string
     specialty: string
     date: string
+    /** Scheduled start and end of the slot, already formatted (e.g. "9:00 AM"). */
     time: string
-    status: "pending" | "confirmed" | "completed" | "cancelled"
+    endTime: string
+    status: "pending" | "confirmed" | "in-progress" | "completed" | "cancelled"
     type: "video" | "in-person"
     price: string
+    /** Actual check-in / check-out times, once the admin marks them. */
+    startedAt?: string
+    completedAt?: string
 }
 
-const FILTERS = ["All", "pending", "confirmed", "completed", "cancelled"] as const
+const FILTERS = ["All", "pending", "confirmed", "in-progress", "completed", "cancelled"] as const
 const STATUS_LABEL: Record<AdminAppointment["status"], string> = {
     pending: "Pending",
     confirmed: "Confirmed",
+    "in-progress": "In progress",
     completed: "Completed",
     cancelled: "Cancelled",
 }
@@ -58,6 +68,8 @@ const STATUS_LABEL: Record<AdminAppointment["status"], string> = {
 function badgeVariant(status: AdminAppointment["status"]) {
     switch (status) {
         case "confirmed":
+            return "default" as const
+        case "in-progress":
             return "default" as const
         case "pending":
             return "secondary" as const
@@ -172,8 +184,24 @@ export function AppointmentsTable({
                                         )}
                                     </TableCell>
                                     <TableCell className="text-sm font-medium">
-                                        <span className="text-foreground">{app.date}</span>
-                                        <span className="text-muted-foreground ml-2">{app.time}</span>
+                                        <div>
+                                            <span className="text-foreground">{app.date}</span>
+                                            <span className="text-muted-foreground ml-2">{app.time} – {app.endTime}</span>
+                                        </div>
+                                        {(app.startedAt || app.completedAt) && (
+                                            <div className="mt-1 flex flex-col gap-0.5 text-[11px] text-muted-foreground font-normal">
+                                                {app.startedAt && (
+                                                    <span className="flex items-center gap-1">
+                                                        <LogIn className="h-3 w-3 text-blue-500" /> Arrived {app.startedAt}
+                                                    </span>
+                                                )}
+                                                {app.completedAt && (
+                                                    <span className="flex items-center gap-1">
+                                                        <LogOut className="h-3 w-3 text-emerald-600" /> Left {app.completedAt}
+                                                    </span>
+                                                )}
+                                            </div>
+                                        )}
                                     </TableCell>
                                     <TableCell>
                                         <Badge variant={badgeVariant(app.status)}>{STATUS_LABEL[app.status]}</Badge>
@@ -417,12 +445,13 @@ function CreateSubmit({ disabled }: { disabled: boolean }) {
 function RowActions({ app }: { app: AdminAppointment }) {
     const [pending, startTransition] = useTransition()
 
-    // Only pending/confirmed appointments have actions; terminal states don't.
+    // Visit lifecycle: pending → confirmed → in-progress → completed.
     const canConfirm = app.status === "pending"
-    const canComplete = app.status === "pending" || app.status === "confirmed"
+    const canStart = app.status === "pending" || app.status === "confirmed"
+    const canComplete = app.status === "in-progress"
     const canCancel = app.status === "pending" || app.status === "confirmed"
 
-    if (!canComplete && !canCancel) {
+    if (!canConfirm && !canStart && !canComplete && !canCancel) {
         return <span className="text-xs text-muted-foreground">—</span>
     }
 
@@ -450,13 +479,25 @@ function RowActions({ app }: { app: AdminAppointment }) {
                     <Check className="h-4 w-4" />
                 </Button>
             )}
+            {canStart && (
+                <Button
+                    variant="outline"
+                    size="icon"
+                    disabled={pending}
+                    onClick={() => run(() => startAppointment(app.id))}
+                    title="Start visit (patient arrived)"
+                    className="h-8 w-8 text-indigo-600 border-indigo-100 hover:bg-indigo-50"
+                >
+                    <PlayCircle className="h-4 w-4" />
+                </Button>
+            )}
             {canComplete && (
                 <Button
                     variant="outline"
                     size="icon"
                     disabled={pending}
                     onClick={() => run(() => completeAppointment(app.id))}
-                    title="Mark completed"
+                    title="Complete visit (patient left)"
                     className="h-8 w-8 text-emerald-600 border-emerald-100 hover:bg-emerald-50"
                 >
                     <CheckCheck className="h-4 w-4" />

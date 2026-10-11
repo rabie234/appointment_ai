@@ -3,7 +3,12 @@ import { auth } from '@/lib/auth';
 import connectDB from '@/lib/mongodb';
 import { genai, GEMINI_MODEL } from '@/lib/gemini';
 import Conversation from '@/models/Conversation';
-import { functionDeclarations, runTool, type BookingSuggestion } from '../../(patient)/ai-chat/tools';
+import {
+  functionDeclarations,
+  runTool,
+  type BookingSuggestion,
+  type BookingConfirmation,
+} from '../../(patient)/ai-chat/tools';
 import {
   buildContents,
   systemInstruction,
@@ -20,7 +25,8 @@ export const dynamic = 'force-dynamic';
  *
  * Event shape (one JSON object per line):
  *   { type: "delta", text }        incremental assistant text
- *   { type: "suggestion", data }   a validated booking suggestion
+ *   { type: "suggestion", data }   a validated booking suggestion (shows Confirm button)
+ *   { type: "booked", data }       an appointment was actually created
  *   { type: "done", conversationId, title }
  *   { type: "error", message }
  */
@@ -54,6 +60,7 @@ export async function POST(req: NextRequest) {
         controller.enqueue(encoder.encode(JSON.stringify(obj) + '\n'));
 
       let suggestion: BookingSuggestion | undefined;
+      let confirmation: BookingConfirmation | undefined;
       let fullText = '';
 
       try {
@@ -107,10 +114,18 @@ export async function POST(req: NextRequest) {
 
           const responseParts = [];
           for (const call of pendingCalls) {
-            const { result, suggestion: s } = await runTool(call.name, call.args);
+            const { result, suggestion: s, confirmation: c } = await runTool(
+              call.name,
+              call.args,
+              patientId
+            );
             if (s) {
               suggestion = s;
               send({ type: 'suggestion', data: s });
+            }
+            if (c) {
+              confirmation = c;
+              send({ type: 'booked', data: c });
             }
             responseParts.push({
               functionResponse: {
@@ -123,9 +138,13 @@ export async function POST(req: NextRequest) {
         }
 
         if (!fullText.trim()) {
-          fullText = suggestion
-            ? `I'd suggest ${suggestion.doctorName} (${suggestion.specialty}) on ${suggestion.date} at ${suggestion.time}. You can book below.`
-            : 'Could you tell me a bit more about what you need help with?';
+          if (confirmation) {
+            fullText = `Booked! Your appointment with ${confirmation.doctorName} (${confirmation.specialty}) is set for ${confirmation.date} at ${confirmation.time}. It's pending the clinic's confirmation.`;
+          } else if (suggestion) {
+            fullText = `I'd suggest ${suggestion.doctorName} (${suggestion.specialty}) on ${suggestion.date} at ${suggestion.time}.`;
+          } else {
+            fullText = 'Could you tell me a bit more about what you need help with?';
+          }
           send({ type: 'delta', text: fullText });
         }
 

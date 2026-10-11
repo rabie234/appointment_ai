@@ -15,27 +15,28 @@ import Doctor from '@/models/Doctor';
 
 export type AppointmentActionState = { error?: string; success?: boolean };
 
-type Status = 'pending' | 'confirmed' | 'completed' | 'cancelled';
+type Status = 'pending' | 'confirmed' | 'in-progress' | 'completed' | 'cancelled';
+type NextStatus = 'confirmed' | 'in-progress' | 'completed' | 'cancelled';
 
 // The statuses an admin is allowed to set, and which current states each may
-// come from. Guards against nonsensical transitions (e.g. reviving a cancelled
-// appointment into "completed").
-const TRANSITIONS: Record<'confirmed' | 'completed' | 'cancelled', Status[]> = {
+// come from. Guards against nonsensical transitions (e.g. completing a visit
+// that never started, or reviving a cancelled one). The visit lifecycle is
+// pending → confirmed → in-progress → completed, with cancel available until
+// the visit starts.
+const TRANSITIONS: Record<NextStatus, Status[]> = {
   confirmed: ['pending'],
-  completed: ['pending', 'confirmed'],
+  'in-progress': ['pending', 'confirmed'],
+  completed: ['in-progress'],
   cancelled: ['pending', 'confirmed'],
 };
 
-async function transition(
-  id: string,
-  next: keyof typeof TRANSITIONS
-): Promise<AppointmentActionState> {
+async function transition(id: string, next: NextStatus): Promise<AppointmentActionState> {
   await requireRole('admin');
   if (!id) return { error: 'Missing appointment id' };
 
   await connectDB();
 
-  const appt = await Appointment.findById(id).select('status');
+  const appt = await Appointment.findById(id).select('status startedAt completedAt');
   if (!appt) return { error: 'Appointment not found' };
 
   if (!TRANSITIONS[next].includes(appt.status)) {
@@ -44,6 +45,9 @@ async function transition(
 
   try {
     appt.status = next;
+    // Stamp the real check-in / check-out times as the visit progresses.
+    if (next === 'in-progress') appt.startedAt = new Date();
+    if (next === 'completed') appt.completedAt = new Date();
     await appt.save();
   } catch (error) {
     console.error(`Set appointment ${next} failed:`, error);
@@ -58,6 +62,12 @@ export async function confirmAppointment(id: string) {
   return transition(id, 'confirmed');
 }
 
+/** Patient has arrived — start the visit (records startedAt). */
+export async function startAppointment(id: string) {
+  return transition(id, 'in-progress');
+}
+
+/** Patient has left — complete the visit (records completedAt). */
 export async function completeAppointment(id: string) {
   return transition(id, 'completed');
 }

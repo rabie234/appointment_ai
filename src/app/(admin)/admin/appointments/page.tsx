@@ -1,5 +1,6 @@
 import connectDB from "@/lib/mongodb"
 import { requireRole } from "@/lib/session"
+import { slotEnd } from "@/lib/schedule"
 import Appointment from "@/models/Appointment"
 import Doctor from "@/models/Doctor"
 import User from "@/models/User"
@@ -27,6 +28,12 @@ function to12h(time: string): string {
     return `${hour12}:${String(m).padStart(2, "0")} ${period}`
 }
 
+/** "h:MM AM/PM" for an actual timestamp (startedAt/completedAt). */
+function stampTime(d?: Date | null): string | undefined {
+    if (!d) return undefined
+    return new Date(d).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" })
+}
+
 type PopulatedName = { name?: string; specialty?: string } | null
 
 export default async function AdminAppointmentsPage() {
@@ -50,10 +57,14 @@ export default async function AdminAppointmentsPage() {
         doctor: a.doctor?.name ?? "Unknown doctor",
         specialty: a.doctor?.specialty ?? "",
         date: dateFmt.format(new Date(a.date)),
+        // Scheduled window, e.g. "9:00 AM – 9:30 AM".
         time: to12h(a.time),
+        endTime: to12h(slotEnd(a.time)),
         status: a.status,
         type: a.type,
         price: `$${a.price.toFixed(2)}`,
+        startedAt: stampTime(a.startedAt),
+        completedAt: stampTime(a.completedAt),
     }))
 
     const patients: PatientOption[] = patientDocs.map((p) => ({

@@ -1,5 +1,6 @@
 import connectDB from "@/lib/mongodb"
 import { requireRole } from "@/lib/session"
+import { slotEnd } from "@/lib/schedule"
 import Appointment from "@/models/Appointment"
 // Ensure the Doctor model is registered before we populate it.
 import "@/models/Doctor"
@@ -23,17 +24,18 @@ function to12h(time: string): string {
     return `${hour12}:${String(m).padStart(2, "0")} ${period}`
 }
 
-type Status = "pending" | "confirmed" | "completed" | "cancelled"
+type Status = "pending" | "confirmed" | "in-progress" | "completed" | "cancelled"
 
 function toTab(status: Status): AppointmentCard["tab"] {
     if (status === "cancelled") return "Cancelled"
     if (status === "completed") return "Completed"
-    return "Upcoming" // pending + confirmed
+    return "Upcoming" // pending + confirmed + in-progress
 }
 
 const STATUS_LABEL: Record<Status, string> = {
     pending: "Pending",
     confirmed: "Confirmed",
+    "in-progress": "In progress",
     completed: "Completed",
     cancelled: "Cancelled",
 }
@@ -56,7 +58,7 @@ export default async function MyAppointmentsPage() {
             doctor: a.doctor?.name ?? "Unknown doctor",
             specialty: a.doctor?.specialty ?? "",
             date: dateFmt.format(new Date(a.date)),
-            time: to12h(a.time),
+            time: `${to12h(a.time)} – ${to12h(slotEnd(a.time))}`,
             tab: toTab(status),
             statusLabel: STATUS_LABEL[status] ?? status,
             type: a.type,

@@ -6,9 +6,13 @@ export interface IAppointment extends Document {
   date: Date;
   time: string;
   type: 'video' | 'in-person';
-  status: 'pending' | 'confirmed' | 'completed' | 'cancelled';
+  status: 'pending' | 'confirmed' | 'in-progress' | 'completed' | 'cancelled';
   price: number;
   notes?: string;
+  /** When the admin marked the patient as arrived (visit started). */
+  startedAt?: Date;
+  /** When the admin marked the visit finished. */
+  completedAt?: Date;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -40,7 +44,7 @@ const AppointmentSchema = new Schema<IAppointment>(
     },
     status: {
       type: String,
-      enum: ['pending', 'confirmed', 'completed', 'cancelled'],
+      enum: ['pending', 'confirmed', 'in-progress', 'completed', 'cancelled'],
       default: 'pending',
     },
     price: {
@@ -50,6 +54,12 @@ const AppointmentSchema = new Schema<IAppointment>(
     notes: {
       type: String,
       trim: true,
+    },
+    startedAt: {
+      type: Date,
+    },
+    completedAt: {
+      type: Date,
     },
   },
   {
