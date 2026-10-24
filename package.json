@@ -7,6 +7,7 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
+    "test": "node --import tsx --test tests/*.test.ts",
     "seed:admin": "tsx scripts/seed-admin.ts",
     "seed:data": "tsx scripts/seed-data.ts"
   },
@@ -20,6 +21,7 @@
     "mongoose": "^9.2.4",
     "next": "16.1.6",
     "next-auth": "^5.0.0-beta.30",
+    "pdf-parse": "^2.4.5",
     "react": "19.2.3",
     "react-dom": "19.2.3",
     "react-markdown": "^10.1.0",
