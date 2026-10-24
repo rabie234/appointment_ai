@@ -62,6 +62,7 @@ const SPECIALTIES: { name: string; description: string }[] = [
 
 type DoctorSeed = {
   name: string;
+  nameAr: string;
   specialty: string;
   experienceYears: number;
   rating: number;
@@ -75,39 +76,49 @@ type DoctorSeed = {
 // Two+ doctors per specialty, with varied schedules so availability differs.
 const DOCTORS: DoctorSeed[] = [
   // Cardiology
-  d('Dr. Sarah Johnson', 'Cardiology', 12, 4.9, 214, 98, 5200, SCHEDULES.fullWeek),
-  d('Dr. Omar Haddad', 'Cardiology', 8, 4.7, 96, 95, 2100, SCHEDULES.mornings),
+  d('Dr. Sarah Johnson', 'د. سارة جونسون', 'Cardiology', 12, 4.9, 214, 98, 5200, SCHEDULES.fullWeek),
+  d('Dr. Omar Haddad', 'د. عمر حداد', 'Cardiology', 8, 4.7, 96, 95, 2100, SCHEDULES.mornings),
+
   // Dermatology
-  d('Dr. Emily Smith', 'Dermatology', 10, 5.0, 260, 97, 4300, SCHEDULES.tuThu),
-  d('Dr. Laila Karam', 'Dermatology', 6, 4.6, 71, 93, 1500, SCHEDULES.afternoons),
+  d('Dr. Emily Smith', 'د. إيميلي سميث', 'Dermatology', 10, 5.0, 260, 97, 4300, SCHEDULES.tuThu),
+  d('Dr. Laila Karam', 'د. ليلى كرم', 'Dermatology', 6, 4.6, 71, 93, 1500, SCHEDULES.afternoons),
+
   // Neurology
-  d('Dr. Michael Chen', 'Neurology', 15, 4.8, 132, 96, 3800, SCHEDULES.mwf),
-  d('Dr. Nadia Rahman', 'Neurology', 9, 4.7, 88, 94, 2400, SCHEDULES.fullWeek),
+  d('Dr. Michael Chen', 'د. مايكل تشين', 'Neurology', 15, 4.8, 132, 96, 3800, SCHEDULES.mwf),
+  d('Dr. Nadia Rahman', 'د. ناديا رحمن', 'Neurology', 9, 4.7, 88, 94, 2400, SCHEDULES.fullWeek),
+
   // Pediatrics
-  d('Dr. David Williams', 'Pediatrics', 11, 4.7, 178, 97, 6100, SCHEDULES.withSaturday),
-  d('Dr. Hana Yusuf', 'Pediatrics', 7, 4.9, 143, 98, 3300, SCHEDULES.mornings),
+  d('Dr. David Williams', 'د. ديفيد ويليامز', 'Pediatrics', 11, 4.7, 178, 97, 6100, SCHEDULES.withSaturday),
+  d('Dr. Hana Yusuf', 'د. هناء يوسف', 'Pediatrics', 7, 4.9, 143, 98, 3300, SCHEDULES.mornings),
+
   // Orthopedics
-  d('Dr. James Miller', 'Orthopedics', 14, 4.6, 119, 92, 2900, SCHEDULES.fullWeek),
-  d('Dr. Sami Nasser', 'Orthopedics', 10, 4.8, 102, 95, 2600, SCHEDULES.afternoons),
+  d('Dr. James Miller', 'د. جيمس ميلر', 'Orthopedics', 14, 4.6, 119, 92, 2900, SCHEDULES.fullWeek),
+  d('Dr. Sami Nasser', 'د. سامي ناصر', 'Orthopedics', 10, 4.8, 102, 95, 2600, SCHEDULES.afternoons),
+
   // Gastroenterology
-  d('Dr. Rachel Green', 'Gastroenterology', 13, 4.7, 91, 94, 3100, SCHEDULES.mwf),
-  d('Dr. Youssef Amir', 'Gastroenterology', 8, 4.5, 64, 91, 1700, SCHEDULES.tuThu),
+  d('Dr. Rachel Green', 'د. راشيل غرين', 'Gastroenterology', 13, 4.7, 91, 94, 3100, SCHEDULES.mwf),
+  d('Dr. Youssef Amir', 'د. يوسف أمير', 'Gastroenterology', 8, 4.5, 64, 91, 1700, SCHEDULES.tuThu),
+
   // Psychiatry
-  d('Dr. Olivia Brown', 'Psychiatry', 12, 4.9, 156, 96, 2800, SCHEDULES.fullWeek),
-  d('Dr. Karim Fadel', 'Psychiatry', 9, 4.6, 73, 93, 1900, SCHEDULES.afternoons),
+  d('Dr. Olivia Brown', 'د. أوليفيا براون', 'Psychiatry', 12, 4.9, 156, 96, 2800, SCHEDULES.fullWeek),
+  d('Dr. Karim Fadel', 'د. كريم فاضل', 'Psychiatry', 9, 4.6, 73, 93, 1900, SCHEDULES.afternoons),
+
   // Ophthalmology
-  d('Dr. Sophia Davis', 'Ophthalmology', 11, 4.8, 128, 97, 4000, SCHEDULES.mornings),
-  d('Dr. Amina Saleh', 'Ophthalmology', 6, 4.7, 59, 95, 1400, SCHEDULES.mwf),
+  d('Dr. Sophia Davis', 'د. صوفيا ديفيس', 'Ophthalmology', 11, 4.8, 128, 97, 4000, SCHEDULES.mornings),
+  d('Dr. Amina Saleh', 'د. أمينة صالح', 'Ophthalmology', 6, 4.7, 59, 95, 1400, SCHEDULES.mwf),
+
   // ENT
-  d('Dr. Daniel Wilson', 'ENT (Otolaryngology)', 10, 4.6, 84, 93, 2200, SCHEDULES.fullWeek),
-  d('Dr. Rima Aziz', 'ENT (Otolaryngology)', 7, 4.8, 67, 96, 1600, SCHEDULES.withSaturday),
+  d('Dr. Daniel Wilson', 'د. دانيال ويلسون', 'ENT (Otolaryngology)', 10, 4.6, 84, 93, 2200, SCHEDULES.fullWeek),
+  d('Dr. Rima Aziz', 'د. ريما عزيز', 'ENT (Otolaryngology)', 7, 4.8, 67, 96, 1600, SCHEDULES.withSaturday),
+
   // General Medicine
-  d('Dr. Thomas Anderson', 'General Medicine', 16, 4.7, 201, 95, 7200, SCHEDULES.fullWeek),
-  d('Dr. Farah Mansour', 'General Medicine', 9, 4.8, 154, 96, 3400, SCHEDULES.mornings, 'on-leave'),
+  d('Dr. Thomas Anderson', 'د. توماس أندرسون', 'General Medicine', 16, 4.7, 201, 95, 7200, SCHEDULES.fullWeek),
+  d('Dr. Farah Mansour', 'د. فرح منصور', 'General Medicine', 9, 4.8, 154, 96, 3400, SCHEDULES.mornings, 'on-leave'),
 ];
 
 function d(
   name: string,
+  nameAr: string,
   specialty: string,
   experienceYears: number,
   rating: number,
@@ -117,7 +128,18 @@ function d(
   schedule: DayHours[],
   availability: 'available' | 'on-leave' = 'available'
 ): DoctorSeed {
-  return { name, specialty, experienceYears, rating, reviews, successRate, totalPatients, schedule, availability };
+  return {
+    name,
+    nameAr,
+    specialty,
+    experienceYears,
+    rating,
+    reviews,
+    successRate,
+    totalPatients,
+    schedule,
+    availability,
+  };
 }
 
 /** Stable e-mail from a doctor's name, e.g. "Dr. Sarah Johnson" → sarah.johnson@clinicai.test */
@@ -171,6 +193,7 @@ async function main() {
       {
         $set: {
           name: doc.name,
+          nameAr: doc.nameAr,
           specialty: doc.specialty,
           email,
           rating: doc.rating,

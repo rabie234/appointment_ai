@@ -1,3 +1,4 @@
+﻿
 import { NextRequest } from 'next/server';
 import { auth } from '@/lib/auth';
 import connectDB from '@/lib/mongodb';
@@ -8,6 +9,7 @@ import {
   runTool,
   type BookingSuggestion,
   type BookingConfirmation,
+  type CancellationSuggestion,
 } from '../../(patient)/ai-chat/tools';
 import {
   buildContents,
@@ -37,7 +39,7 @@ export async function POST(req: NextRequest) {
   }
   const patientId = session.user.id;
 
-  let body: { message?: string; history?: ChatTurn[]; conversationId?: string | null };
+  let body: { message?: string; history?: ChatTurn[]; conversationId?: string | null; language?: string };
   try {
     body = await req.json();
   } catch {
@@ -48,6 +50,7 @@ export async function POST(req: NextRequest) {
   if (!message) return new Response('Empty message', { status: 400 });
   const history: ChatTurn[] = Array.isArray(body.history) ? body.history : [];
   const conversationId = body.conversationId ?? null;
+  const responseLanguage = body.language === "ar" ? "Arabic" : body.language === "en" ? "English" : "auto";
 
   const today = new Date().toISOString().slice(0, 10);
   const contents = buildContents(history, message);
@@ -61,15 +64,16 @@ export async function POST(req: NextRequest) {
 
       let suggestion: BookingSuggestion | undefined;
       let confirmation: BookingConfirmation | undefined;
+      let cancellationSuggestion: CancellationSuggestion | undefined;
       let fullText = '';
 
-      try {
+           try {
         for (let round = 0; round < MAX_TOOL_ROUNDS; round++) {
           const streamResult = await genai.models.generateContentStream({
             model: GEMINI_MODEL,
             contents,
             config: {
-              systemInstruction: systemInstruction(today),
+              systemInstruction: systemInstruction(today, responseLanguage),
               tools: [{ functionDeclarations }],
             },
           });
@@ -114,7 +118,7 @@ export async function POST(req: NextRequest) {
 
           const responseParts = [];
           for (const call of pendingCalls) {
-            const { result, suggestion: s, confirmation: c } = await runTool(
+            const { result, suggestion: s, confirmation: c,cancellationSuggestion: cs, } = await runTool(
               call.name,
               call.args,
               patientId
@@ -127,6 +131,10 @@ export async function POST(req: NextRequest) {
               confirmation = c;
               send({ type: 'booked', data: c });
             }
+            if (cs) {
+  cancellationSuggestion = cs;
+  send({ type: 'cancel_suggestion', data: cs });
+}
             responseParts.push({
               functionResponse: {
                 name: call.name,
@@ -205,7 +213,7 @@ async function persist(opts: {
     }
   }
 
-  // New conversation — title from the first user message.
+  // New conversation â€” title from the first user message.
   const title = titleFrom(opts.userMessage);
   const created = await Conversation.create({
     patient: opts.patientId,
@@ -217,5 +225,6 @@ async function persist(opts: {
 
 function titleFrom(text: string): string {
   const trimmed = text.trim().replace(/\s+/g, ' ');
-  return trimmed.length > 48 ? `${trimmed.slice(0, 48)}…` : trimmed || 'New conversation';
+  return trimmed.length > 48 ? `${trimmed.slice(0, 48)}â€¦` : trimmed || 'New conversation';
 }
+

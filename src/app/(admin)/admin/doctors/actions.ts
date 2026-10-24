@@ -1,9 +1,11 @@
 'use server';
 
+import Appointment from '@/models/Appointment';
 import { revalidatePath } from 'next/cache';
 import connectDB from '@/lib/mongodb';
 import { requireRole } from '@/lib/session';
 import { getClinicHours } from '@/lib/clinic-hours';
+import { genai, GEMINI_MODEL } from '@/lib/gemini';
 import {
   validateAgainstClinic,
   validateWeek,
@@ -31,6 +33,7 @@ export async function createDoctor(
   await requireRole('admin');
 
   const name = String(formData.get('name') ?? '').trim();
+  const nameAr = String(formData.get('nameAr') ?? '').trim();
   const specialty = String(formData.get('specialty') ?? '').trim();
   const email = String(formData.get('email') ?? '').trim().toLowerCase();
   const phone = String(formData.get('phone') ?? '').trim();
@@ -54,6 +57,7 @@ export async function createDoctor(
   try {
     await Doctor.create({
       name,
+      nameAr,
       specialty,
       email,
       phone: phone || undefined,
@@ -78,6 +82,7 @@ export async function updateDoctor(
 
   const id = String(formData.get('id') ?? '');
   const name = String(formData.get('name') ?? '').trim();
+  const nameAr = String(formData.get('nameAr') ?? '').trim();
   const specialty = String(formData.get('specialty') ?? '').trim();
   const email = String(formData.get('email') ?? '').trim().toLowerCase();
   const phone = String(formData.get('phone') ?? '').trim();
@@ -101,25 +106,53 @@ export async function updateDoctor(
     return { error: 'Another doctor already uses this email' };
   }
 
-  try {
-    const updated = await Doctor.findByIdAndUpdate(
-      id,
-      {
-        name,
-        specialty,
-        email,
-        phone: phone || undefined,
-        experience: experience || undefined,
-        status: status === 'inactive' ? 'inactive' : 'active',
-        availability: availability === 'on-leave' ? 'on-leave' : 'available',
-      },
-      { new: true, runValidators: true }
-    );
-    if (!updated) return { error: 'Doctor not found' };
-  } catch (error) {
-    console.error('Update doctor failed:', error);
-    return { error: 'Could not update doctor. Please try again.' };
+  
+try {
+  const updated = await Doctor.findByIdAndUpdate(
+    id,
+    {
+      name,
+      nameAr,
+      specialty,
+      email,
+      phone: phone || undefined,
+      experience: experience || undefined,
+      status: status === 'inactive' ? 'inactive' : 'active',
+      availability: availability === 'on-leave' ? 'on-leave' : 'available',
+    },
+    { new: true, runValidators: true }
+  );
+
+  if (!updated) return { error: 'Doctor not found' };
+
+  // Cancel future pending and confirmed appointments
+  // when the doctor is inactive.
+  if (updated.status === 'inactive') {
+    const today = new Date();
+    today.setUTCHours(0, 0, 0, 0);
+
+   
+await Appointment.updateMany(
+  {
+    doctor: updated._id,
+    date: { $gte: today },
+    status: { $in: ['pending', 'confirmed'] },
+  },
+  {
+    $set: {
+      status: 'cancelled',
+      cancellationReason:
+        'This appointment was cancelled because the doctor is currently unavailable. Please contact the clinic to reschedule.',
+    },
   }
+);
+
+  }
+} catch (error) {
+  console.error('Update doctor failed:', error);
+  return { error: 'Could not update doctor. Please try again.' };
+}
+
 
   revalidatePath('/admin/doctors');
   return { success: true };
@@ -207,7 +240,26 @@ export async function createSpecialty(
   }
 
   try {
-    await Specialty.create({ name, description: description || undefined });
+    let nameAr = '';
+
+try {
+  const result = await genai.models.generateContent({
+    model: GEMINI_MODEL,
+    contents: `Translate this medical specialty name into accurate Arabic.
+Return only the Arabic translation, with no explanation.
+Specialty: ${name}`,
+  });
+
+  nameAr = result.text?.trim() ?? '';
+} catch (error) {
+  console.error('Specialty translation failed:', error);
+}
+
+await Specialty.create({
+  name,
+  nameAr: nameAr || undefined,
+  description: description || undefined,
+});
   } catch (error) {
     console.error('Create specialty failed:', error);
     return { error: 'Could not create specialty. Please try again.' };

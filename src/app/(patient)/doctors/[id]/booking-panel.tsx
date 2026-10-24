@@ -1,3 +1,4 @@
+
 "use client"
 
 import { useState, useTransition, useActionState, useEffect } from "react"
@@ -5,6 +6,8 @@ import { useFormStatus } from "react-dom"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { cn } from "@/lib/utils"
+import { useLanguage } from "@/components/i18n/language-provider"
+import { t } from "@/components/i18n/translations"
 import {
     Calendar as CalendarIcon,
     Video,
@@ -14,28 +17,43 @@ import {
 } from "lucide-react"
 import { getAvailableSlots, bookAppointment, type BookingState } from "./actions"
 
-/** Next `count` calendar days as {value: "YYYY-MM-DD", label, weekday}. */
-function upcomingDays(count: number) {
+function upcomingDays(count: number, language: "en" | "ar") {
     const out: { value: string; label: string; weekday: string }[] = []
     const today = new Date()
+
     for (let i = 0; i < count; i++) {
         const d = new Date(today)
         d.setDate(today.getDate() + i)
+
         out.push({
             value: d.toISOString().slice(0, 10),
-            label: d.toLocaleDateString("en-US", { month: "short", day: "numeric" }),
-            weekday: d.toLocaleDateString("en-US", { weekday: "short" }),
+            label: d.toLocaleDateString(language === "ar" ? "ar-LB" : "en-US", {
+                month: "short",
+                day: "numeric",
+                timeZone: "UTC",
+            }),
+            weekday: d.toLocaleDateString(language === "ar" ? "ar-LB" : "en-US", {
+                weekday: "short",
+                timeZone: "UTC",
+            }),
         })
     }
+
     return out
 }
 
-/** "HH:MM" (24h) → "h:MM AM/PM" for display. */
-function pretty(time: string): string {
+function pretty(time: string, language: "en" | "ar"): string {
     const [h, m] = time.split(":").map(Number)
-    const period = h >= 12 ? "PM" : "AM"
-    const hour12 = h % 12 === 0 ? 12 : h % 12
-    return `${hour12}:${String(m).padStart(2, "0")} ${period}`
+    if (Number.isNaN(h) || Number.isNaN(m)) return time
+
+    const date = new Date(Date.UTC(2026, 0, 1, h, m))
+
+    return new Intl.DateTimeFormat(language === "ar" ? "ar-LB" : "en-US", {
+        hour: "numeric",
+        minute: "2-digit",
+        hour12: true,
+        timeZone: "UTC",
+    }).format(date)
 }
 
 export function BookingPanel({
@@ -47,21 +65,18 @@ export function BookingPanel({
     fee: number
     active: boolean
 }) {
-    const days = upcomingDays(14)
+    const { language } = useLanguage()
+    const days = upcomingDays(14, language)
     const [selectedDate, setSelectedDate] = useState(days[0].value)
     const [selectedTime, setSelectedTime] = useState<string | null>(null)
     const [type, setType] = useState<"in-person" | "video">("in-person")
-
     const [slots, setSlots] = useState<string[]>([])
     const [loadingSlots, startLoadingSlots] = useTransition()
-
     const [state, formAction] = useActionState<BookingState, FormData>(bookAppointment, {})
 
-    // Whenever the chosen date changes, fetch that day's free slots. The
-    // previously selected time is cleared in the date-change handler (an event),
-    // not here, so this effect only synchronises with the server.
     useEffect(() => {
         if (!active) return
+
         startLoadingSlots(async () => {
             const res = await getAvailableSlots(doctorId, selectedDate)
             setSlots(res.slots ?? [])
@@ -81,13 +96,15 @@ export function BookingPanel({
                         <CheckCircle2 className="h-8 w-8 text-emerald-600" />
                     </div>
                     <div>
-                        <h3 className="text-lg font-bold">Appointment requested</h3>
+                        <h3 className="text-lg font-bold">
+                            {t(language, "Appointment requested")}
+                        </h3>
                         <p className="text-sm text-muted-foreground mt-1">
-                            Your booking is pending confirmation. Track it under My Appointments.
+                            {t(language, "Your booking is pending confirmation. Track it under My Appointments.")}
                         </p>
                     </div>
                     <Button variant="outline" onClick={() => window.location.assign("/appointments")}>
-                        Go to My Appointments
+                        {t(language, "Go to My Appointments")}
                     </Button>
                 </CardContent>
             </Card>
@@ -99,13 +116,14 @@ export function BookingPanel({
             <CardHeader>
                 <CardTitle className="flex items-center gap-2">
                     <CalendarIcon className="h-5 w-5 text-primary" />
-                    Book Appointment
+                    {t(language, "Book Appointment")}
                 </CardTitle>
             </CardHeader>
+
             <CardContent>
                 {!active ? (
                     <p className="text-sm text-muted-foreground py-6 text-center">
-                        This doctor is currently not accepting appointments.
+                        {t(language, "This doctor is currently not accepting appointments.")}
                     </p>
                 ) : (
                     <form action={formAction} className="space-y-6">
@@ -114,9 +132,10 @@ export function BookingPanel({
                         <input type="hidden" name="time" value={selectedTime ?? ""} />
                         <input type="hidden" name="type" value={type} />
 
-                        {/* Date picker */}
                         <div>
-                            <p className="text-sm font-semibold mb-3 tracking-tight">Select Date</p>
+                            <p className="text-sm font-semibold mb-3 tracking-tight">
+                                {t(language, "Select Date")}
+                            </p>
                             <div className="grid grid-cols-4 gap-2">
                                 {days.slice(0, 8).map((d) => (
                                     <button
@@ -137,9 +156,10 @@ export function BookingPanel({
                             </div>
                         </div>
 
-                        {/* Visit type */}
                         <div>
-                            <p className="text-sm font-semibold mb-3 tracking-tight">Visit Type</p>
+                            <p className="text-sm font-semibold mb-3 tracking-tight">
+                                {t(language, "Visit Type")}
+                            </p>
                             <div className="grid grid-cols-2 gap-2">
                                 {([
                                     { key: "in-person", label: "In-Person", Icon: MapPin },
@@ -157,22 +177,24 @@ export function BookingPanel({
                                         )}
                                     >
                                         <Icon className="h-3.5 w-3.5" />
-                                        {label}
+                                        {t(language, label)}
                                     </button>
                                 ))}
                             </div>
                         </div>
 
-                        {/* Slots */}
                         <div>
-                            <p className="text-sm font-semibold mb-3 tracking-tight">Select Time Slot</p>
+                            <p className="text-sm font-semibold mb-3 tracking-tight">
+                                {t(language, "Select Time Slot")}
+                            </p>
+
                             {loadingSlots ? (
                                 <div className="flex items-center justify-center py-8 text-muted-foreground">
                                     <Loader2 className="h-5 w-5 animate-spin" />
                                 </div>
                             ) : slots.length === 0 ? (
                                 <p className="text-sm text-muted-foreground py-6 text-center border rounded-lg">
-                                    No available slots on this day.
+                                    {t(language, "No available slots on this day.")}
                                 </p>
                             ) : (
                                 <div className="grid grid-cols-3 gap-2">
@@ -188,7 +210,7 @@ export function BookingPanel({
                                                     : "hover:border-primary hover:text-primary"
                                             )}
                                         >
-                                            {pretty(time)}
+                                            {pretty(time, language)}
                                         </button>
                                     ))}
                                 </div>
@@ -203,12 +225,19 @@ export function BookingPanel({
 
                         <div className="pt-4 border-t space-y-4">
                             <div className="flex justify-between items-center text-sm">
-                                <span className="text-muted-foreground">Consultation Fee</span>
+                                <span className="text-muted-foreground">
+                                    {t(language, "Consultation Fee")}
+                                </span>
                                 <span className="font-bold text-lg">${fee.toFixed(2)}</span>
                             </div>
-                            <BookButton disabled={!selectedTime} />
+
+                            <BookButton
+                                disabled={!selectedTime}
+                                language={language}
+                            />
+
                             <p className="text-[10px] text-center text-muted-foreground px-4">
-                                You won&apos;t be charged yet. Payment is handled at the clinic.
+                                {t(language, "You won't be charged yet. Payment is handled at the clinic.")}
                             </p>
                         </div>
                     </form>
@@ -218,9 +247,15 @@ export function BookingPanel({
     )
 }
 
-function BookButton({ disabled }: { disabled: boolean }) {
-    // useFormStatus must be read from a child of the <form>.
+function BookButton({
+    disabled,
+    language,
+}: {
+    disabled: boolean
+    language: "en" | "ar"
+}) {
     const { pending } = useFormStatus()
+
     return (
         <Button
             type="submit"
@@ -228,7 +263,7 @@ function BookButton({ disabled }: { disabled: boolean }) {
             className="w-full py-6 text-lg shadow-xl shadow-blue-200 gap-2"
         >
             {pending && <Loader2 className="h-5 w-5 animate-spin" />}
-            Book Now
+            {t(language, "Book Now")}
         </Button>
     )
 }

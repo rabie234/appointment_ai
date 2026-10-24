@@ -31,6 +31,7 @@ import {
     startAppointment,
     completeAppointment,
     cancelAppointment,
+    markAppointmentMissed,
     adminCreateAppointment,
     getDoctorSlots,
     type AppointmentActionState,
@@ -45,10 +46,11 @@ export type AdminAppointment = {
     doctor: string
     specialty: string
     date: string
+    scheduledDate: string
     /** Scheduled start and end of the slot, already formatted (e.g. "9:00 AM"). */
     time: string
     endTime: string
-    status: "pending" | "confirmed" | "in-progress" | "completed" | "cancelled"
+    status: "pending" | "confirmed" | "in-progress" | "completed" | "cancelled" | "missed"
     type: "video" | "in-person"
     price: string
     /** Actual check-in / check-out times, once the admin marks them. */
@@ -56,13 +58,14 @@ export type AdminAppointment = {
     completedAt?: string
 }
 
-const FILTERS = ["All", "pending", "confirmed", "in-progress", "completed", "cancelled"] as const
+const FILTERS = ["All", "pending", "confirmed", "in-progress", "completed", "cancelled", "missed"] as const
 const STATUS_LABEL: Record<AdminAppointment["status"], string> = {
     pending: "Pending",
     confirmed: "Confirmed",
     "in-progress": "In progress",
     completed: "Completed",
     cancelled: "Cancelled",
+    missed:"missed",
 }
 
 function badgeVariant(status: AdminAppointment["status"]) {
@@ -77,6 +80,8 @@ function badgeVariant(status: AdminAppointment["status"]) {
             return "success" as const
         case "cancelled":
             return "destructive" as const
+            case "missed":
+    return "destructive"
     }
 }
 
@@ -444,17 +449,20 @@ function CreateSubmit({ disabled }: { disabled: boolean }) {
 
 function RowActions({ app }: { app: AdminAppointment }) {
     const [pending, startTransition] = useTransition()
+    const [showCancelForm, setShowCancelForm] = useState(false)
+    const [cancellationReason, setCancellationReason] = useState("")
 
     // Visit lifecycle: pending → confirmed → in-progress → completed.
     const canConfirm = app.status === "pending"
     const canStart = app.status === "pending" || app.status === "confirmed"
     const canComplete = app.status === "in-progress"
     const canCancel = app.status === "pending" || app.status === "confirmed"
-
-    if (!canConfirm && !canStart && !canComplete && !canCancel) {
-        return <span className="text-xs text-muted-foreground">—</span>
-    }
-
+    const canMarkMissed =
+    (app.status === "pending" || app.status === "confirmed") &&
+    new Date(app.scheduledDate) < new Date()
+    if (!canConfirm && !canStart && !canComplete && !canCancel && !canMarkMissed) {
+    return <span className="text-xs text-muted-foreground">—</span>
+}
     function run(fn: () => Promise<{ error?: string }>, confirmMsg?: string) {
         if (confirmMsg && !window.confirm(confirmMsg)) return
         startTransition(async () => {
@@ -504,17 +512,80 @@ function RowActions({ app }: { app: AdminAppointment }) {
                 </Button>
             )}
             {canCancel && (
-                <Button
-                    variant="outline"
-                    size="icon"
-                    disabled={pending}
-                    onClick={() => run(() => cancelAppointment(app.id), `Cancel ${app.patient}'s appointment with ${app.doctor}?`)}
-                    title="Cancel"
-                    className="h-8 w-8 text-destructive border-red-100 hover:bg-red-50"
-                >
-                    <X className="h-4 w-4" />
-                </Button>
-            )}
+    <>
+        <Button
+            variant="outline"
+            size="icon"
+            disabled={pending}
+            onClick={() => setShowCancelForm((prev) => !prev)}
+            title="Cancel"
+            className="h-8 w-8 text-destructive border-red-100 hover:bg-red-50"
+        >
+            <X className="h-4 w-4" />
+        </Button>
+        
+        {showCancelForm && (
+            <div className="flex flex-col gap-2 min-w-64 text-left">
+                <label className="text-sm font-medium">
+                    Cancellation Comment (Optional)
+                </label>
+
+                <textarea
+                    value={cancellationReason}
+                    onChange={(e) => setCancellationReason(e.target.value)}
+                    placeholder="Enter the reason for cancellation..."
+                    rows={3}
+                    className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+                />
+
+                <div className="flex gap-2">
+                    <Button
+                        size="sm"
+                        variant="outline"
+                        disabled={pending}
+                        onClick={() => setShowCancelForm(false)}
+                    >
+                        Back
+                    </Button>
+
+                    <Button
+                        size="sm"
+                        variant="destructive"
+                        disabled={pending}
+                        onClick={() =>
+                            run(
+                                () => cancelAppointment(app.id, cancellationReason),
+                                `Cancel ${app.patient}'s appointment with ${app.doctor}?`
+                            )
+                        }
+                    >
+                        Confirm Cancellation
+                    </Button>
+                    
+                    
+                </div>
+            </div>
+        )}
+        </>
+)}
+
+{canMarkMissed && (
+    <Button
+        variant="outline"
+        size="sm"
+        disabled={pending}
+        onClick={() =>
+            run(
+                () => markAppointmentMissed(app.id),
+                `Confirm that ${app.patient} did not attend the appointment?`
+            )
+        }
+        title="Mark as missed"
+    >
+        Mark Missed
+    </Button>
+)}
+
         </div>
     )
 }

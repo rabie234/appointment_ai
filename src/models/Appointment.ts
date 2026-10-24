@@ -6,9 +6,10 @@ export interface IAppointment extends Document {
   date: Date;
   time: string;
   type: 'video' | 'in-person';
-  status: 'pending' | 'confirmed' | 'in-progress' | 'completed' | 'cancelled';
+  status: 'pending' | 'confirmed' | 'in-progress' | 'completed' | 'cancelled' | 'missed';
   price: number;
   notes?: string;
+  cancellationReason?: string;
   /** When the admin marked the patient as arrived (visit started). */
   startedAt?: Date;
   /** When the admin marked the visit finished. */
@@ -44,7 +45,7 @@ const AppointmentSchema = new Schema<IAppointment>(
     },
     status: {
       type: String,
-      enum: ['pending', 'confirmed', 'in-progress', 'completed', 'cancelled'],
+      enum: ['pending', 'confirmed', 'in-progress', 'completed', 'cancelled','missed'],
       default: 'pending',
     },
     price: {
@@ -61,6 +62,10 @@ const AppointmentSchema = new Schema<IAppointment>(
     completedAt: {
       type: Date,
     },
+    cancellationReason: {
+  type: String,
+  trim: true,
+    },
   },
   {
     timestamps: true,
@@ -71,6 +76,16 @@ const AppointmentSchema = new Schema<IAppointment>(
 AppointmentSchema.index({ patient: 1, date: 1 });
 AppointmentSchema.index({ doctor: 1, date: 1 });
 AppointmentSchema.index({ status: 1 });
+
+AppointmentSchema.index(
+  { doctor: 1, date: 1, time: 1 },
+  {
+    unique: true,
+    partialFilterExpression: {
+      status: { $in: ['pending', 'confirmed', 'in-progress'] },
+    },
+  }
+);
 
 const Appointment: Model<IAppointment> =
   mongoose.models.Appointment || mongoose.model<IAppointment>('Appointment', AppointmentSchema);

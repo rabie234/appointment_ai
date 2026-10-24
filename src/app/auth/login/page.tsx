@@ -1,5 +1,6 @@
 "use client"
-
+import { useLanguage } from "@/components/i18n/language-provider"
+import { t } from "@/components/i18n/translations"
 import { useActionState } from "react"
 import { useFormStatus } from "react-dom"
 import { useSearchParams } from "next/navigation"
@@ -13,16 +14,16 @@ import { HeartPulse, Loader2, CheckCircle2 } from "lucide-react"
 
 function SubmitButton() {
     const { pending } = useFormStatus()
-
+    const { language } = useLanguage()
     return (
         <Button type="submit" className="w-full h-11 shadow-lg shadow-blue-200" disabled={pending}>
             {pending ? (
                 <>
                     <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                    Signing in...
+                    {t(language, "Signing in...")}
                 </>
             ) : (
-                "Sign in"
+                t(language, "Sign in")
             )}
         </Button>
     )
@@ -34,7 +35,7 @@ function LoginForm() {
 
     const justRegistered = searchParams.get("registered") === "true"
     const callbackUrl = searchParams.get("callbackUrl") ?? ""
-
+    const { language } = useLanguage()
     return (
         <form action={formAction} className="space-y-4">
             <input type="hidden" name="callbackUrl" value={callbackUrl} />
@@ -42,7 +43,7 @@ function LoginForm() {
             {justRegistered && !state.error && (
                 <div className="p-3 text-sm text-emerald-600 bg-emerald-50 border border-emerald-200 rounded-lg flex items-center gap-2">
                     <CheckCircle2 className="h-4 w-4" />
-                    Account created successfully! Please sign in.
+                    {t(language, "Account created successfully! Please sign in.")}
                 </div>
             )}
             {state.error && (
@@ -53,7 +54,7 @@ function LoginForm() {
 
             <div className="space-y-2">
                 <label htmlFor="email" className="text-sm font-medium">
-                    Email
+                  {t(language, "Email")}
                 </label>
                 <Input
                     id="email"
@@ -86,6 +87,7 @@ function LoginForm() {
 }
 
 export default function LoginPage() {
+    const { language } = useLanguage()
     return (
         <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-primary/5 via-background to-background p-4">
             <Card className="w-full max-w-md border-none shadow-xl bg-card/60 backdrop-blur-sm">

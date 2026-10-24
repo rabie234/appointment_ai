@@ -3,6 +3,7 @@ import { type DayHours, defaultWeek } from '@/lib/schedule';
 
 export interface IDoctor extends Document {
   name: string;
+  nameAr:string;
   specialty: string;
   email: string;
   phone?: string;
@@ -28,6 +29,11 @@ const DoctorSchema = new Schema<IDoctor>(
       type: String,
       required: [true, 'Please provide a doctor name'],
       trim: true,
+    },
+     nameAr: {
+      type: String,
+      trim: true,
+      default: '',
     },
     specialty: {
       type: String,

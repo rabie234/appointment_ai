@@ -134,9 +134,24 @@ export async function bookAppointment(
       status: 'pending',
       price: CONSULTATION_FEE,
     });
-  } catch (error) {
+    
+  } catch (error: unknown) {
+    if (
+      typeof error === 'object' &&
+      error !== null &&
+      'code' in error &&
+      error.code === 11000
+    ) {
+      return {
+        error: 'That slot was just taken. Please pick another time.',
+      };
+    }
+
     console.error('Book appointment failed:', error);
-    return { error: 'Could not book the appointment. Please try again.' };
+
+    return {
+      error: 'Could not book the appointment. Please try again.',
+    };
   }
 
   revalidatePath('/appointments');

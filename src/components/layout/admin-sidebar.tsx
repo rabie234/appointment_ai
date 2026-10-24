@@ -1,4 +1,4 @@
-"use client"
+﻿"use client"
 
 import Link from "next/link"
 import { usePathname } from "next/navigation"
@@ -14,6 +14,9 @@ import {
 } from "lucide-react"
 import { LogoutButton } from "./logout-button"
 import { cn } from "@/lib/utils"
+import { LanguageSwitcher } from "@/components/i18n/language-switcher"
+import { useLanguage } from "@/components/i18n/language-provider"
+import { t } from "@/components/i18n/translations"
 
 const adminNavItems = [
     { name: "Dashboard", href: "/admin/dashboard", icon: LayoutDashboard },
@@ -27,6 +30,7 @@ const adminNavItems = [
 
 export function AdminSidebar() {
     const pathname = usePathname()
+    const { language } = useLanguage()
 
     return (
         <aside className="hidden lg:flex flex-col w-64 border-r bg-card h-screen sticky top-0 overflow-hidden">
@@ -36,7 +40,7 @@ export function AdminSidebar() {
                 </div>
                 <div>
                     <span className="text-xl font-bold tracking-tight text-primary">ClinicAI</span>
-                    <p className="text-[10px] text-muted-foreground font-semibold uppercase tracking-widest">Admin Panel</p>
+                    <p className="text-[10px] text-muted-foreground font-semibold uppercase tracking-widest">{t(language, "Admin Panel")}</p>
                 </div>
             </div>
 
@@ -56,15 +60,19 @@ export function AdminSidebar() {
                             )}
                         >
                             <Icon className={cn("h-5 w-5", isActive ? "text-primary-foreground" : "text-primary group-hover:scale-110 transition-transform")} />
-                            <span>{item.name}</span>
+                            <span>{t(language, item.name)}</span>
                         </Link>
                     )
                 })}
             </nav>
 
-            <div className="p-4 border-t">
+            <div className="p-4 border-t space-y-3">
+                <LanguageSwitcher />
                 <LogoutButton className="w-full px-3 py-2.5 rounded-xl" />
             </div>
         </aside>
     )
 }
+
+
+

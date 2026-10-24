@@ -51,13 +51,28 @@ export default async function AdminAppointmentsPage() {
         Doctor.find({ status: "active" }).select("name specialty").sort({ name: 1 }).lean(),
     ])
 
+   
+
+    const patients: PatientOption[] = patientDocs.map((p) => ({
+        id: String(p._id),
+        name: p.name,
+        email: p.email,
+    }))
+
+   
+    const doctors: DoctorOption[] = doctorDocs.map((d) => ({
+        id: String(d._id),
+        name: d.name,
+        specialty: d.specialty,
+    }))
+
     const appointments: AdminAppointment[] = docs.map((a) => ({
         id: String(a._id),
+        scheduledDate: `${new Date(a.date).toISOString().slice(0, 10)}T${a.time}:00+03:00`,
         patient: a.patient?.name ?? "Unknown patient",
         doctor: a.doctor?.name ?? "Unknown doctor",
         specialty: a.doctor?.specialty ?? "",
         date: dateFmt.format(new Date(a.date)),
-        // Scheduled window, e.g. "9:00 AM – 9:30 AM".
         time: to12h(a.time),
         endTime: to12h(slotEnd(a.time)),
         status: a.status,
@@ -67,19 +82,11 @@ export default async function AdminAppointmentsPage() {
         completedAt: stampTime(a.completedAt),
     }))
 
-    const patients: PatientOption[] = patientDocs.map((p) => ({
-        id: String(p._id),
-        name: p.name,
-        email: p.email,
-    }))
-
-    const doctors: DoctorOption[] = doctorDocs.map((d) => ({
-        id: String(d._id),
-        name: d.name,
-        specialty: d.specialty,
-    }))
-
     return (
-        <AppointmentsTable appointments={appointments} patients={patients} doctors={doctors} />
+        <AppointmentsTable
+            appointments={appointments}
+            patients={patients}
+            doctors={doctors}
+        />
     )
 }
