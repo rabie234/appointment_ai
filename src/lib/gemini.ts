@@ -15,6 +15,6 @@ if (!GEMINI_API_KEY) {
  * if symptom→specialty routing or multi-step function calling proves unreliable,
  * bump this to the current Flash tier (e.g. 'gemini-2.5-flash').
  */
-export const GEMINI_MODEL = 'gemini-3.5-flash-lite';
+export { GEMINI_MODEL } from './ai-config';
 
 export const genai = new GoogleGenAI({ apiKey: GEMINI_API_KEY });

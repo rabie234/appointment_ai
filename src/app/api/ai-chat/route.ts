@@ -1,230 +1,287 @@
-﻿
-import { NextRequest } from 'next/server';
-import { auth } from '@/lib/auth';
-import connectDB from '@/lib/mongodb';
-import { genai, GEMINI_MODEL } from '@/lib/gemini';
-import Conversation from '@/models/Conversation';
+import { NextRequest } from "next/server";
+import { isValidObjectId } from "mongoose";
+import { auth } from "@/lib/auth";
+import connectDB from "@/lib/mongodb";
+import Conversation, { type IChatMessage } from "@/models/Conversation";
+import AIRun from "@/models/AIRun";
+import { runAssistant } from "@/lib/ai-assistant";
 import {
-  functionDeclarations,
   runTool,
   type BookingSuggestion,
   type BookingConfirmation,
-  type CancellationSuggestion,
-} from '../../(patient)/ai-chat/tools';
-import {
-  buildContents,
-  systemInstruction,
-  MAX_TOOL_ROUNDS,
-  type ChatTurn,
-} from '../../(patient)/ai-chat/chat-core';
+} from "../../(patient)/ai-chat/tools";
+import type { ChatTurn } from "../../(patient)/ai-chat/chat-core";
 
-export const dynamic = 'force-dynamic';
+export const dynamic = "force-dynamic";
 
-/**
- * Streaming AI chat. Runs the function-calling loop and streams the final
- * assistant text to the browser as newline-delimited JSON events, then persists
- * the whole exchange to the patient's conversation.
- *
- * Event shape (one JSON object per line):
- *   { type: "delta", text }        incremental assistant text
- *   { type: "suggestion", data }   a validated booking suggestion (shows Confirm button)
- *   { type: "booked", data }       an appointment was actually created
- *   { type: "done", conversationId, title }
- *   { type: "error", message }
- */
+/** Streaming chat; explicit confirmation consumes one saved, patient-owned proposal. */
 export async function POST(req: NextRequest) {
   const session = await auth();
-  if (!session?.user || session.user.role !== 'patient') {
-    return new Response('Unauthorized', { status: 401 });
-  }
+  if (!session?.user || session.user.role !== "patient")
+    return new Response("Unauthorized", { status: 401 });
   const patientId = session.user.id;
-
-  let body: { message?: string; history?: ChatTurn[]; conversationId?: string | null; language?: string };
+  let body: Record<string, unknown>;
   try {
     body = await req.json();
+    if (!body || typeof body !== "object" || Array.isArray(body))
+      throw new Error();
   } catch {
-    return new Response('Bad request', { status: 400 });
+    return new Response("Bad request", { status: 400 });
   }
 
-  const message = String(body.message ?? '').trim();
-  if (!message) return new Response('Empty message', { status: 400 });
-  const history: ChatTurn[] = Array.isArray(body.history) ? body.history : [];
-  const conversationId = body.conversationId ?? null;
-  const responseLanguage = body.language === "ar" ? "Arabic" : body.language === "en" ? "English" : "auto";
+  const message = typeof body.message === "string" ? body.message.trim() : "";
+  if (!message || message.length > 4000)
+    return new Response("Message must contain 1–4,000 characters.", {
+      status: 400,
+    });
+  const conversationId = body.conversationId;
+  if (
+    conversationId !== null &&
+    conversationId !== undefined &&
+    (typeof conversationId !== "string" || !isValidObjectId(conversationId))
+  ) {
+    return new Response("Invalid conversation.", { status: 400 });
+  }
+  const confirmProposalId = body.confirmProposalId;
+  if (
+    confirmProposalId !== undefined &&
+    (typeof confirmProposalId !== "string" ||
+      !confirmProposalId ||
+      confirmProposalId.length > 100)
+  ) {
+    return new Response("Invalid confirmation.", { status: 400 });
+  }
+  // The patient's selected interface language; anything else lets the model follow the patient.
+  const responseLanguage =
+    body.language === "ar"
+      ? "Arabic"
+      : body.language === "en"
+        ? "English"
+        : "auto";
 
-  const today = new Date().toISOString().slice(0, 10);
-  const contents = buildContents(history, message);
+  let history: ChatTurn[] = [];
+  let approvedBooking: BookingSuggestion | undefined;
+  try {
+    await connectDB();
+    if (confirmProposalId) {
+      if (!conversationId)
+        return new Response("A saved booking proposal is required.", {
+          status: 400,
+        });
+      const claimed = await Conversation.findOneAndUpdate(
+        {
+          _id: conversationId,
+          patient: patientId,
+          "pendingBooking.proposalId": confirmProposalId,
+        },
+        { $unset: { pendingBooking: 1 } },
+        { new: false },
+      ).lean();
+      if (!claimed?.pendingBooking)
+        return new Response(
+          "This proposal has expired or was already confirmed. Check My Appointments, or ask for a new suggestion.",
+          { status: 409 },
+        );
+      approvedBooking = claimed.pendingBooking;
+    } else if (conversationId) {
+      const conversation = await Conversation.findOneAndUpdate(
+        { _id: conversationId, patient: patientId },
+        { $unset: { pendingBooking: 1 } },
+        { new: false },
+      ).lean();
+      if (!conversation)
+        return new Response("Conversation not found.", { status: 404 });
+      // The browser cannot supply assistant history or fabricate a previous confirmation.
+      history = conversation.messages
+        .slice(-40)
+        .map((m) => ({ role: m.role, text: m.text }));
+    }
+  } catch (error) {
+    console.error("Load chat failed:", error);
+    return new Response("Could not load the conversation. Please try again.", {
+      status: 503,
+    });
+  }
 
   const encoder = new TextEncoder();
-
   const stream = new ReadableStream({
     async start(controller) {
-      const send = (obj: unknown) =>
-        controller.enqueue(encoder.encode(JSON.stringify(obj) + '\n'));
-
-      let suggestion: BookingSuggestion | undefined;
-      let confirmation: BookingConfirmation | undefined;
-      let cancellationSuggestion: CancellationSuggestion | undefined;
-      let fullText = '';
-
-           try {
-        for (let round = 0; round < MAX_TOOL_ROUNDS; round++) {
-          const streamResult = await genai.models.generateContentStream({
-            model: GEMINI_MODEL,
-            contents,
-            config: {
-              systemInstruction: systemInstruction(today, responseLanguage),
-              tools: [{ functionDeclarations }],
+      let disconnected = false;
+      const send = (event: unknown) => {
+        if (disconnected) return;
+        try {
+          controller.enqueue(encoder.encode(JSON.stringify(event) + "\n"));
+        } catch {
+          disconnected = true;
+        }
+      };
+      const started = Date.now();
+      let success = false;
+      let knowledgeSearches = 0;
+      let knowledgeHits = 0;
+      let createdBooking: BookingConfirmation | undefined;
+      try {
+        let text: string;
+        let suggestion: BookingSuggestion | undefined;
+        let confirmation: BookingConfirmation | undefined;
+        let sources: NonNullable<IChatMessage["sources"]> = [];
+        if (approvedBooking) {
+          // This write is outside the model loop. Only the consumed database proposal supplies its arguments.
+          const tool = await runTool(
+            "confirm_booking",
+            {
+              doctorId: approvedBooking.doctorId,
+              date: approvedBooking.date,
+              time: approvedBooking.time,
+            },
+            patientId,
+            { mode: "patient", approvedBooking },
+          );
+          confirmation = tool.confirmation;
+          createdBooking = confirmation;
+          if (confirmation) {
+            text = `Your appointment with ${confirmation.doctorName} (${confirmation.specialty}) is booked for ${confirmation.date} at ${confirmation.time}, pending the clinic's confirmation.`;
+            send({ type: "booked", data: confirmation });
+          } else {
+            const result = tool.result as {
+              reason?: string;
+              alternatives?: string[];
+            };
+            text = `${result.reason ?? "The appointment could not be booked."} ${
+              result.alternatives?.length
+                ? `Available alternatives: ${result.alternatives.join(", ")}. Ask me to suggest a new time.`
+                : "Please ask me to look for a new appointment."
+            }`;
+          }
+          send({ type: "delta", text });
+        } else {
+          const result = await runAssistant({
+            message,
+            history,
+            patientId,
+            mode: "patient",
+            responseLanguage,
+            onEvent: (event) => {
+              if (event.type === "sources") {
+                send({
+                  type: "sources",
+                  data: event.data.map((hit) => ({
+                    id: hit.id,
+                    title: hit.question,
+                    source: hit.source,
+                    revision: hit.revision,
+                  })),
+                });
+              } else {
+                send(event);
+              }
             },
           });
-
-          const pendingCalls: { name: string; args: Record<string, unknown> }[] = [];
-          let modelContent: unknown;
-
-          for await (const chunk of streamResult) {
-            // Stream any text deltas straight to the client.
-            const text = chunk.text;
-            if (text) {
-              fullText += text;
-              send({ type: 'delta', text });
-            }
-            // Collect function calls; capture the model content (with the
-            // Gemini 3.x thought signatures) to echo back next round.
-            const calls = chunk.functionCalls;
-            if (calls?.length) {
-              for (const c of calls) {
-                pendingCalls.push({
-                  name: c.name ?? '',
-                  args: (c.args ?? {}) as Record<string, unknown>,
-                });
-              }
-              const cand = chunk.candidates?.[0]?.content;
-              if (cand) modelContent = cand;
-            }
-          }
-
-          if (pendingCalls.length === 0) {
-            break; // final answer streamed; done
-          }
-
-          // Echo the model's tool-call turn verbatim (preserves thoughtSignature),
-          // run each tool, and feed the results back.
-          contents.push(
-            (modelContent as (typeof contents)[number]) ?? {
-              role: 'model',
-              parts: pendingCalls.map((c) => ({ functionCall: { name: c.name, args: c.args } })),
-            }
-          );
-
-          const responseParts = [];
-          for (const call of pendingCalls) {
-            const { result, suggestion: s, confirmation: c,cancellationSuggestion: cs, } = await runTool(
-              call.name,
-              call.args,
-              patientId
-            );
-            if (s) {
-              suggestion = s;
-              send({ type: 'suggestion', data: s });
-            }
-            if (c) {
-              confirmation = c;
-              send({ type: 'booked', data: c });
-            }
-            if (cs) {
-  cancellationSuggestion = cs;
-  send({ type: 'cancel_suggestion', data: cs });
-}
-            responseParts.push({
-              functionResponse: {
-                name: call.name,
-                response: result as Record<string, unknown>,
-              },
-            });
-          }
-          contents.push({ role: 'user', parts: responseParts });
+          text = result.text;
+          suggestion = result.suggestion;
+          sources = result.sources.map((hit) => ({
+            id: hit.id,
+            title: hit.question,
+            source: hit.source,
+            revision: hit.revision,
+          }));
+          knowledgeSearches = result.knowledgeSearches;
+          knowledgeHits = result.knowledgeHits;
         }
-
-        if (!fullText.trim()) {
-          if (confirmation) {
-            fullText = `Booked! Your appointment with ${confirmation.doctorName} (${confirmation.specialty}) is set for ${confirmation.date} at ${confirmation.time}. It's pending the clinic's confirmation.`;
-          } else if (suggestion) {
-            fullText = `I'd suggest ${suggestion.doctorName} (${suggestion.specialty}) on ${suggestion.date} at ${suggestion.time}.`;
-          } else {
-            fullText = 'Could you tell me a bit more about what you need help with?';
-          }
-          send({ type: 'delta', text: fullText });
-        }
-
-        // Persist the exchange.
-        const { conversationId: savedId, title } = await persist({
+        const saved = await persist({
           patientId,
-          conversationId,
-          userMessage: message,
-          modelText: fullText,
+          conversationId: (conversationId as string | null) ?? null,
+          userMessage: approvedBooking
+            ? `Confirm booking with ${approvedBooking.doctorName} on ${approvedBooking.date} at ${approvedBooking.time}.`
+            : message,
+          text,
           suggestion,
+          confirmation,
+          sources,
         });
-
-        send({ type: 'done', conversationId: savedId, title });
+        success = true;
+        send({ type: "done", ...saved });
       } catch (error) {
-        console.error('AI chat stream failed:', error);
-        send({ type: 'error', message: 'The assistant is unavailable right now. Please try again.' });
+        console.error("AI chat failed:", error);
+        send({
+          type: "error",
+          message: createdBooking
+            ? "Your appointment was created, but the chat history could not be saved. Check My Appointments for its details."
+            : "The assistant is unavailable right now. Please try again.",
+        });
       } finally {
-        controller.close();
+        if (!disconnected) {
+          try {
+            controller.close();
+          } catch {
+            /* Client closed the stream. */
+          }
+        }
+        if (!approvedBooking) {
+          try {
+            await AIRun.create({
+              mode: "patient",
+              actor: patientId,
+              success,
+              durationMs: Date.now() - started,
+              knowledgeSearches,
+              knowledgeHits,
+            });
+          } catch (error) {
+            console.error("Save chat metrics failed:", error);
+          }
+        }
       }
     },
   });
-
   return new Response(stream, {
     headers: {
-      'Content-Type': 'text/plain; charset=utf-8',
-      'Cache-Control': 'no-cache, no-transform',
+      "Content-Type": "text/plain; charset=utf-8",
+      "Cache-Control": "no-cache, no-transform",
     },
   });
 }
 
-/** Append the user + model messages to a conversation (creating it if needed). */
-async function persist(opts: {
+async function persist(options: {
   patientId: string;
   conversationId: string | null;
   userMessage: string;
-  modelText: string;
+  text: string;
   suggestion?: BookingSuggestion;
+  confirmation?: BookingConfirmation;
+  sources: NonNullable<IChatMessage["sources"]>;
 }): Promise<{ conversationId: string; title: string }> {
-  await connectDB();
-
-  const userMsg = { role: 'user' as const, text: opts.userMessage, createdAt: new Date() };
-  const modelMsg = {
-    role: 'model' as const,
-    text: opts.modelText,
-    suggestion: opts.suggestion,
-    createdAt: new Date(),
-  };
-
-  if (opts.conversationId) {
-    const existing = await Conversation.findOne({
-      _id: opts.conversationId,
-      patient: opts.patientId,
-    });
-    if (existing) {
-      existing.messages.push(userMsg, modelMsg);
-      await existing.save();
-      return { conversationId: String(existing._id), title: existing.title };
-    }
+  const messages: IChatMessage[] = [
+    { role: "user", text: options.userMessage, createdAt: new Date() },
+    {
+      role: "model",
+      text: options.text,
+      suggestion: options.suggestion,
+      confirmation: options.confirmation,
+      sources: options.sources,
+      createdAt: new Date(),
+    },
+  ];
+  if (options.conversationId) {
+    const doc = await Conversation.findOneAndUpdate(
+      { _id: options.conversationId, patient: options.patientId },
+      {
+        $push: { messages: { $each: messages } },
+        ...(options.suggestion
+          ? { $set: { pendingBooking: options.suggestion } }
+          : {}),
+      },
+      { new: true },
+    );
+    if (!doc) throw new Error("Conversation was deleted while replying.");
+    return { conversationId: String(doc._id), title: doc.title };
   }
-
-  // New conversation â€” title from the first user message.
-  const title = titleFrom(opts.userMessage);
-  const created = await Conversation.create({
-    patient: opts.patientId,
+  const title = options.userMessage.replace(/\s+/g, " ").slice(0, 48);
+  const doc = await Conversation.create({
+    patient: options.patientId,
     title,
-    messages: [userMsg, modelMsg],
+    messages,
+    pendingBooking: options.suggestion,
   });
-  return { conversationId: String(created._id), title };
+  return { conversationId: String(doc._id), title: doc.title };
 }
-
-function titleFrom(text: string): string {
-  const trimmed = text.trim().replace(/\s+/g, ' ');
-  return trimmed.length > 48 ? `${trimmed.slice(0, 48)}â€¦` : trimmed || 'New conversation';
-}
-

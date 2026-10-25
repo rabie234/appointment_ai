@@ -170,6 +170,14 @@ const translations = {
 "Sunday": "الأحد",
 "ENT (Otolaryngology)": "الأنف والأذن والحنجرة",
 "Otolaryngology": "طب الأنف والأذن والحنجرة",
+"Appointment cancellation": "طلب إلغاء موعد",
+"The appointment will not be cancelled until you confirm.": "لن يُلغى الموعد إلا بعد تأكيدك.",
+"Cancelling...": "جارٍ الإلغاء...",
+"Confirm Cancellation": "تأكيد إلغاء الموعد",
+"Appointment cancelled successfully.": "تم إلغاء الموعد بنجاح.",
+"Clinic sources": "مصادر العيادة",
+"revision": "مراجعة",
+"The assistant response was interrupted. Please try again.": "انقطع رد المساعد. يُرجى المحاولة مجددًا.",
 
 
 

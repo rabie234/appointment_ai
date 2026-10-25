@@ -1,43 +1,61 @@
-
-import { Type, type FunctionDeclaration } from '@google/genai';
-import { isValidObjectId } from 'mongoose';
-import connectDB from '@/lib/mongodb';
-import { freeSlotsFor, parseDay } from '@/lib/slots-server';
-import { CONSULTATION_FEE } from './chat-core';
-import Doctor from '@/models/Doctor';
-import Specialty from '@/models/Specialty';
-import Appointment from '@/models/Appointment';
+import { Type, type FunctionDeclaration } from "@google/genai";
+import { isValidObjectId } from "mongoose";
+import connectDB from "@/lib/mongodb";
+import { freeSlotsFor, parseDay } from "@/lib/slots-server";
+import { CONSULTATION_FEE } from "./chat-core";
+import Doctor from "@/models/Doctor";
+import Specialty from "@/models/Specialty";
+import Appointment from "@/models/Appointment";
+import { randomUUID } from "node:crypto";
+import { searchKnowledge } from "@/lib/knowledge-server";
+import { bookingIsAuthorized, type ToolContext } from "@/lib/booking-policy";
 
 /**
  * The tools the AI assistant can call. Most are READ-ONLY — they look up the
- * clinic's real doctors, specialties, and live availability. confirm_booking
- * creates an appointment only after explicit patient confirmation.
+ * clinic's real doctors, specialties, and live availability. `confirm_booking`
+ * is deliberately absent from the model's declarations. The server invokes it
+ * only after consuming a patient-owned saved proposal; sandbox calls are denied.
  */
 
 // ── Function declarations (what the model sees) ─────────────────────────────
 
 export const functionDeclarations: FunctionDeclaration[] = [
   {
-    name: 'list_specialties',
+    name: "search_clinic_knowledge",
     description:
-      'List the medical specialties this clinic actually offers. Call this FIRST when a ' +
-      'patient describes a problem, so you route them to a specialty the clinic really has.',
+      "Search approved clinic FAQs and documents for policies, location, insurance, preparation and general clinic information. Returns source IDs, titles and passages. Never use this for live appointment slots or doctor availability.",
+    parameters: {
+      type: Type.OBJECT,
+      properties: {
+        query: {
+          type: Type.STRING,
+          description: "The patient question or relevant search terms.",
+        },
+      },
+      required: ["query"],
+    },
+  },
+  {
+    name: "list_specialties",
+    description:
+      "List the medical specialties this clinic actually offers. Call this FIRST when a " +
+      "patient describes a problem, so you route them to a specialty the clinic really has.",
     parameters: { type: Type.OBJECT, properties: {} },
   },
   {
-    name: 'find_doctors',
+    name: "find_doctors",
     description:
-      'Search active clinic doctors by specialty, doctor name, or both. ' +
-      'When a patient requests a specific doctor, search by name across all specialties, ' +
-      'without restricting the search to the recommended specialty. ' +
-      'Return each doctor id, name, actual specialty, rating, and experience.',
+      "Search active clinic doctors by specialty, doctor name, or both. " +
+      "When a patient requests a specific doctor, search by name across all specialties, " +
+      "without restricting the search to the recommended specialty. " +
+      "Return each doctor id, name, actual specialty, rating, and experience.",
     parameters: {
       type: Type.OBJECT,
       properties: {
         specialty: {
           type: Type.STRING,
           description:
-            'Optional specialty filter. Use this when searching for doctors in a particular specialty.',
+            "Optional specialty filter. Use the exact specialty name returned by list_specialties.",
         },
         name: {
           type: Type.STRING,
@@ -48,7 +66,7 @@ export const functionDeclarations: FunctionDeclaration[] = [
     },
   },
   {
-    name: 'get_available_slots',
+    name: "get_available_slots",
     description:
       "Get a doctor's real free appointment time slots for a specific date. Use the doctorId " +
       'from find_doctors. Date must be "YYYY-MM-DD". Returns 24h "HH:MM" times still open.',
@@ -57,100 +75,70 @@ export const functionDeclarations: FunctionDeclaration[] = [
       properties: {
         doctorId: {
           type: Type.STRING,
-          description: 'The doctor id from find_doctors.',
+          description: "The doctor id from find_doctors.",
         },
         date: {
           type: Type.STRING,
-          description: 'Target date in YYYY-MM-DD format.',
+          description: "Target date in YYYY-MM-DD format.",
         },
       },
-      required: ['doctorId', 'date'],
+      required: ["doctorId", "date"],
     },
   },
   {
-    name: 'propose_booking',
+    name: "propose_booking",
     description:
-      'Call this once you have settled on a specific doctor, date and free time to recommend ' +
+      "Call this once you have settled on a specific doctor, date and free time to recommend " +
       'to the patient. It records a structured suggestion the UI shows with a "Confirm booking" ' +
-      'button. Do NOT book yet — wait for the patient to confirm. Only use a doctorId/date/time ' +
-      'you obtained from the other tools.',
+      "button. Do NOT book yet — wait for the patient to confirm. Only use a doctorId/date/time " +
+      "you obtained from the other tools.",
     parameters: {
       type: Type.OBJECT,
       properties: {
         doctorId: {
           type: Type.STRING,
-          description: 'The recommended doctor id.',
+          description: "The recommended doctor id.",
         },
         date: {
           type: Type.STRING,
-          description: 'Recommended date, YYYY-MM-DD.',
+          description: "Recommended date, YYYY-MM-DD.",
         },
         time: {
           type: Type.STRING,
-          description: 'Recommended free slot, 24h HH:MM.',
+          description: "Recommended free slot, 24h HH:MM.",
         },
       },
-      required: ['doctorId', 'date', 'time'],
+      required: ["doctorId", "date", "time"],
     },
   },
   {
-    name: 'find_my_appointments',
+    name: "find_my_appointments",
     description:
-      'Find the signed-in patient appointments with a doctor. Use when the patient wants to cancel an appointment. If the patient gives a doctor name, search for that doctor in the clinic first. If the doctor does not exist, report that clearly. If no doctor name is given, ask the patient for it. Never cancel an appointment with this tool.',
+      "Find the signed-in patient appointments with a doctor. Use when the patient wants to cancel an appointment. If the patient gives a doctor name, search for that doctor in the clinic first. If the doctor does not exist, report that clearly. If no doctor name is given, ask the patient for it. Never cancel an appointment with this tool.",
     parameters: {
       type: Type.OBJECT,
       properties: {
         doctorName: {
           type: Type.STRING,
-          description: 'Doctor name provided by the patient, if known.',
+          description: "Doctor name provided by the patient, if known.",
         },
       },
     },
   },
   {
-    name: 'propose_cancellation',
+    name: "propose_cancellation",
     description:
-      'Prepare a cancellation suggestion for a specific appointment returned by find_my_appointments. Never cancel the appointment.',
+      "Prepare a cancellation suggestion for a specific appointment returned by find_my_appointments. Never cancel the appointment.",
     parameters: {
       type: Type.OBJECT,
       properties: {
         appointmentId: {
           type: Type.STRING,
-          description: 'The exact appointment ID returned by find_my_appointments.',
+          description:
+            "The exact appointment ID returned by find_my_appointments.",
         },
       },
-      required: ['appointmentId'],
-    },
-  },
-  {
-    name: 'confirm_booking',
-    description:
-      'Actually create the appointment in the system. Call this ONLY after the patient has ' +
-      'explicitly confirmed a specific doctor, date and time (e.g. they clicked Confirm or said ' +
-      '"yes, book it"). If the slot is no longer free, this returns booked:false with a reason ' +
-      'and a list of alternative free times — tell the patient that slot is unavailable and ' +
-      'offer one of the alternatives.',
-    parameters: {
-      type: Type.OBJECT,
-      properties: {
-        doctorId: {
-          type: Type.STRING,
-          description: 'The doctor id to book.',
-        },
-        date: {
-          type: Type.STRING,
-          description: 'Date to book, YYYY-MM-DD.',
-        },
-        time: {
-          type: Type.STRING,
-          description: 'Slot to book, 24h HH:MM.',
-        },
-        type: {
-          type: Type.STRING,
-          description: 'Visit type: "in-person" (default) or "video".',
-        },
-      },
-      required: ['doctorId', 'date', 'time'],
+      required: ["appointmentId"],
     },
   },
 ];
@@ -158,6 +146,7 @@ export const functionDeclarations: FunctionDeclaration[] = [
 // ── Tool implementations ────────────────────────────────────────────────────
 
 export type BookingSuggestion = {
+  proposalId: string;
   doctorId: string;
   doctorName: string;
   specialty: string;
@@ -171,53 +160,37 @@ export type CancellationSuggestion = {
   specialty: string;
   date: string;
   time: string;
-  type: 'in-person' | 'video';
+  type: "in-person" | "video";
 };
 
 async function listSpecialties() {
   await connectDB();
-
   const [specialtyDocs, usedSpecialties] = await Promise.all([
-    Specialty.find().select('name description').sort({ name: 1 }).lean(),
-    Doctor.distinct('specialty', { status: 'active' }),
+    Specialty.find().select("name description").sort({ name: 1 }).lean(),
+    Doctor.distinct("specialty", { status: "active" }),
   ]);
-
   const names = Array.from(
-    new Set([...specialtyDocs.map((s) => s.name), ...usedSpecialties])
+    new Set([...specialtyDocs.map((s) => s.name), ...usedSpecialties]),
   ).sort();
-
   return { specialties: names };
 }
 
 async function findDoctors(args: { specialty?: string; name?: string }) {
-  const specialty = String(args.specialty ?? '').trim();
-  const name = String(args.name ?? '').trim();
-
+  const specialty = String(args.specialty ?? "").trim();
+  const name = String(args.name ?? "").trim();
   if (!specialty && !name) {
-    return {
-      error: 'Provide a doctor name, a specialty, or both.',
-    };
+    return { error: "Provide a doctor name, a specialty, or both." };
   }
 
   await connectDB();
-
-  const filter: Record<string, unknown> = {
-    status: 'active',
-  };
-
-  if (specialty) {
-    filter.specialty = new RegExp(
-      `^${escapeRegExp(specialty)}$`,
-      'i'
-    );
-  }
-
-  if (name) {
-    filter.name = new RegExp(escapeRegExp(name), 'i');
-  }
+  const filter: Record<string, unknown> = { status: "active" };
+  // Case-insensitive exact match so "cardiology" still matches "Cardiology".
+  if (specialty)
+    filter.specialty = new RegExp(`^${escapeRegExp(specialty)}$`, "i");
+  if (name) filter.name = new RegExp(escapeRegExp(name), "i");
 
   const docs = await Doctor.find(filter)
-    .select('name specialty rating experience availability')
+    .select("name specialty rating experience availability")
     .sort({ rating: -1 })
     .limit(20)
     .lean();
@@ -228,67 +201,49 @@ async function findDoctors(args: { specialty?: string; name?: string }) {
       name: d.name,
       specialty: d.specialty,
       rating: d.rating ?? 0,
-      experience: d.experience ?? '',
+      experience: d.experience ?? "",
       availability: d.availability,
     })),
   };
 }
 
-async function getAvailableSlots(args: {
-  doctorId?: string;
-  date?: string;
-}) {
-  const doctorId = String(args.doctorId ?? '');
-  const date = String(args.date ?? '');
-
-  if (!doctorId || !date) {
-    return { error: 'doctorId and date are required' };
-  }
+async function getAvailableSlots(args: { doctorId?: string; date?: string }) {
+  const doctorId = String(args.doctorId ?? "");
+  const date = String(args.date ?? "");
+  if (!doctorId || !date) return { error: "doctorId and date are required" };
 
   const result = await freeSlotsFor(doctorId, date);
-
-  if (result.error) {
-    return { error: result.error };
-  }
-
+  if (result.error) return { error: result.error };
   return { date, slots: result.slots ?? [] };
 }
 
 async function findMyAppointments(
   patientId: string,
-  args: { doctorName?: string }
+  args: { doctorName?: string },
 ) {
-  const doctorName = String(args.doctorName ?? '').trim();
-
-  if (!doctorName) {
-    return { needsDoctorName: true };
-  }
+  const doctorName = String(args.doctorName ?? "").trim();
+  if (!doctorName) return { needsDoctorName: true };
 
   await connectDB();
 
   const doctors = await Doctor.find({
-    status: 'active',
-    name: { $regex: escapeRegExp(doctorName), $options: 'i' },
+    status: "active",
+    name: { $regex: escapeRegExp(doctorName), $options: "i" },
   })
-    .select('name specialty')
+    .select("name specialty")
     .lean();
 
   if (doctors.length === 0) {
-    return {
-      doctorNotFound: true,
-      requestedName: doctorName,
-    };
+    return { doctorNotFound: true, requestedName: doctorName };
   }
-
-  const doctorIds = doctors.map((doctor) => doctor._id);
 
   const appointments = await Appointment.find({
     patient: patientId,
-    doctor: { $in: doctorIds },
-    status: { $in: ['pending', 'confirmed'] },
+    doctor: { $in: doctors.map((doctor) => doctor._id) },
+    status: { $in: ["pending", "confirmed"] },
     date: { $gte: new Date(new Date().setHours(0, 0, 0, 0)) },
   })
-    .populate('doctor', 'name specialty')
+    .populate("doctor", "name specialty")
     .sort({ date: 1, time: 1 })
     .lean();
 
@@ -299,7 +254,6 @@ async function findMyAppointments(
         name: string;
         specialty: string;
       };
-
       return {
         appointmentId: String(appointment._id),
         doctorName: doctor.name,
@@ -312,16 +266,18 @@ async function findMyAppointments(
   };
 }
 
+/**
+ * Validate that an appointment belongs to the patient and can still be
+ * cancelled, and return it as a suggestion card. This never cancels — the
+ * patient does that from the card, via /api/ai-chat/cancel-appointment.
+ */
 async function proposeCancellation(
   patientId: string,
-  args: { appointmentId: string }
+  args: { appointmentId: string },
 ) {
-  const appointmentId = String(args.appointmentId ?? '');
-
+  const appointmentId = String(args.appointmentId ?? "");
   if (!isValidObjectId(appointmentId)) {
-    return {
-      error: 'Invalid appointment ID.',
-    };
+    return { error: "Invalid appointment ID." };
   }
 
   await connectDB();
@@ -329,16 +285,14 @@ async function proposeCancellation(
   const appointment = await Appointment.findOne({
     _id: appointmentId,
     patient: patientId,
-    status: { $in: ['pending', 'confirmed'] },
+    status: { $in: ["pending", "confirmed"] },
     date: { $gte: new Date(new Date().setHours(0, 0, 0, 0)) },
   })
-    .populate('doctor', 'name specialty')
+    .populate("doctor", "name specialty")
     .lean();
 
   if (!appointment || !appointment.doctor) {
-    return {
-      error: 'This appointment cannot be cancelled or was not found.',
-    };
+    return { error: "This appointment cannot be cancelled or was not found." };
   }
 
   const doctor = appointment.doctor as unknown as {
@@ -366,48 +320,40 @@ async function proposeBooking(args: {
   date?: string;
   time?: string;
 }) {
-  const doctorId = String(args.doctorId ?? '');
-  const date = String(args.date ?? '');
-  const time = String(args.time ?? '');
-
+  const doctorId = String(args.doctorId ?? "");
+  const date = String(args.date ?? "");
+  const time = String(args.time ?? "");
   if (!doctorId || !date || !time) {
-    return {
-      ok: false,
-      error: 'doctorId, date and time are required',
-    };
+    return { ok: false, error: "doctorId, date and time are required" };
   }
+  if (!isValidObjectId(doctorId))
+    return { ok: false, error: "Invalid doctor id" };
 
   await connectDB();
-
   const doctor = await Doctor.findById(doctorId)
-    .select('name specialty status')
+    .select("name specialty status")
     .lean();
-
-  if (!doctor || doctor.status !== 'active') {
-    return { ok: false, error: 'That doctor is not available' };
+  if (!doctor || doctor.status !== "active") {
+    return { ok: false, error: "That doctor is not available" };
   }
 
   const { slots, error } = await freeSlotsFor(doctorId, date);
-
-  if (error) {
-    return { ok: false, error };
-  }
-
+  if (error) return { ok: false, error };
   if (!slots?.includes(time)) {
     return {
       ok: false,
-      error: 'That time is not actually free — pick from get_available_slots.',
+      error: "That time is not actually free — pick from get_available_slots.",
     };
   }
 
   const suggestion: BookingSuggestion = {
+    proposalId: randomUUID(),
     doctorId,
     doctorName: doctor.name,
     specialty: doctor.specialty,
     date,
     time,
   };
-
   return { ok: true, suggestion };
 }
 
@@ -417,7 +363,7 @@ export type BookingConfirmation = {
   specialty: string;
   date: string;
   time: string;
-  type: 'in-person' | 'video';
+  type: "in-person" | "video";
 };
 
 /**
@@ -428,55 +374,38 @@ export type BookingConfirmation = {
  */
 async function confirmBooking(
   patientId: string,
-  args: {
-    doctorId?: string;
-    date?: string;
-    time?: string;
-    type?: string;
-  }
+  args: { doctorId?: string; date?: string; time?: string; type?: string },
 ) {
-  const doctorId = String(args.doctorId ?? '');
-  const date = String(args.date ?? '');
-  const time = String(args.time ?? '');
+  const doctorId = String(args.doctorId ?? "");
+  const date = String(args.date ?? "");
+  const time = String(args.time ?? "");
   const type =
-    String(args.type ?? 'in-person') === 'video' ? 'video' : 'in-person';
+    String(args.type ?? "in-person") === "video" ? "video" : "in-person";
 
   if (!isValidObjectId(doctorId) || !date || !time) {
-    return {
-      booked: false,
-      reason: 'doctorId, date and time are required',
-    };
+    return { booked: false, reason: "doctorId, date and time are required" };
   }
 
   const day = parseDay(date);
-
-  if (!day) {
-    return { booked: false, reason: 'Invalid date' };
-  }
+  if (!day) return { booked: false, reason: "Invalid date" };
 
   const today = new Date();
   today.setUTCHours(0, 0, 0, 0);
-
-  if (day < today) {
-    return { booked: false, reason: 'That date has already passed' };
-  }
+  if (day < today)
+    return { booked: false, reason: "That date has already passed" };
 
   await connectDB();
 
   const doctor = await Doctor.findById(doctorId)
-    .select('name specialty status')
+    .select("name specialty status")
     .lean();
-
-  if (!doctor || doctor.status !== 'active') {
-    return { booked: false, reason: 'That doctor is not available' };
+  if (!doctor || doctor.status !== "active") {
+    return { booked: false, reason: "That doctor is not available" };
   }
 
   // The source of truth for "is this slot bookable right now".
   const { slots, error } = await freeSlotsFor(doctorId, date);
-
-  if (error) {
-    return { booked: false, reason: error };
-  }
+  if (error) return { booked: false, reason: error };
 
   if (!slots?.includes(time)) {
     // Conflict — the slot is gone (or never existed). Offer what's still free.
@@ -494,7 +423,7 @@ async function confirmBooking(
       date: day,
       time,
       type,
-      status: 'pending',
+      status: "pending",
       price: CONSULTATION_FEE,
     });
 
@@ -506,29 +435,29 @@ async function confirmBooking(
       time,
       type,
     };
-
     return { booked: true, confirmation };
   } catch (err) {
-    console.error('confirm_booking failed:', err);
-
+    console.error("confirm_booking failed:", err);
     return {
       booked: false,
-      reason: 'Could not create the appointment. Please try again.',
+      reason: "Could not create the appointment. Please try again.",
     };
   }
 }
 
 /**
  * Dispatch a model function call by name. Returns the tool result to feed back
- * to the model, plus (when applicable) a booking suggestion, booking
- * confirmation, or cancellation suggestion for the caller to stream to the UI.
+ * to the model, plus (when applicable) a booking `suggestion`, a booking
+ * `confirmation`, or a `cancellationSuggestion` that the caller lifts onto the
+ * stream so the UI can render the matching card.
  *
- * patientId comes from the authenticated session, never from the model.
+ * `patientId` comes from the authenticated session, never from the model.
  */
 export async function runTool(
   name: string,
   args: Record<string, unknown>,
-  patientId: string
+  patientId: string,
+  context: ToolContext = { mode: "patient" },
 ): Promise<{
   result: unknown;
   suggestion?: BookingSuggestion;
@@ -536,59 +465,66 @@ export async function runTool(
   cancellationSuggestion?: CancellationSuggestion;
 }> {
   switch (name) {
-    case 'list_specialties':
+    case "search_clinic_knowledge": {
+      const query = String(args.query ?? "")
+        .trim()
+        .slice(0, 2000);
+      const knowledgeMode =
+        context.mode === "test"
+          ? (context.knowledgeMode ?? "draft")
+          : "published";
+      return {
+        result: { sources: await searchKnowledge(query, knowledgeMode) },
+      };
+    }
+    case "list_specialties":
       return { result: await listSpecialties() };
-
-    case 'find_doctors':
+    case "find_doctors":
       return { result: await findDoctors(args) };
-
-    case 'get_available_slots':
+    case "get_available_slots":
       return { result: await getAvailableSlots(args) };
-
-    case 'propose_booking': {
+    case "propose_booking": {
       const res = await proposeBooking(args);
-
       return res.ok
         ? { result: { ok: true }, suggestion: res.suggestion }
         : { result: res };
     }
-
-    case 'confirm_booking': {
+    case "confirm_booking": {
+      if (!bookingIsAuthorized(context, args)) {
+        return {
+          result: {
+            booked: false,
+            reason:
+              "Booking requires the patient to confirm the current saved proposal. Sandbox booking is disabled.",
+          },
+        };
+      }
       const res = await confirmBooking(patientId, args);
-
       return res.booked
         ? { result: { booked: true }, confirmation: res.confirmation }
         : { result: res };
     }
-
-    case 'find_my_appointments': {
-      const res = await findMyAppointments(patientId, {
-        doctorName: String(args.doctorName ?? ''),
-      });
-
-      return { result: res };
-    }
-
-    case 'propose_cancellation': {
-      const res = await proposeCancellation(patientId, {
-        appointmentId: String(args.appointmentId ?? ''),
-      });
-
-      if ('error' in res) {
-        return { result: res };
-      }
-
+    case "find_my_appointments":
       return {
-        result: { message: 'Cancellation suggestion prepared.' },
+        result: await findMyAppointments(patientId, {
+          doctorName: String(args.doctorName ?? ""),
+        }),
+      };
+    case "propose_cancellation": {
+      const res = await proposeCancellation(patientId, {
+        appointmentId: String(args.appointmentId ?? ""),
+      });
+      if ("error" in res) return { result: res };
+      return {
+        result: { message: "Cancellation suggestion prepared." },
         cancellationSuggestion: res,
       };
     }
-
     default:
       return { result: { error: `Unknown tool: ${name}` } };
   }
 }
 
 function escapeRegExp(value: string): string {
-  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
