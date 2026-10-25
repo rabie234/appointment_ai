@@ -15,8 +15,14 @@ import {
     Loader2,
     CheckCircle2,
 } from "lucide-react"
-import { getAvailableSlots, bookAppointment, type BookingState } from "./actions"
-
+import {
+    getAvailableSlots,
+    getDoctorLeaveDates,
+    bookAppointment,
+    type BookingState,
+} from "./actions"
+import { useRouter, useSearchParams } from "next/navigation"
+import { rescheduleLeaveConflictAppointment } from "../../appointments/actions"
 function upcomingDays(count: number, language: "en" | "ar") {
     const out: { value: string; label: string; weekday: string }[] = []
     const today = new Date()
@@ -68,26 +74,88 @@ export function BookingPanel({
     const { language } = useLanguage()
     const days = upcomingDays(14, language)
     const [selectedDate, setSelectedDate] = useState(days[0].value)
+    const [leaveDates, setLeaveDates] = useState<string[]>([])
     const [selectedTime, setSelectedTime] = useState<string | null>(null)
     const [type, setType] = useState<"in-person" | "video">("in-person")
     const [slots, setSlots] = useState<string[]>([])
     const [loadingSlots, startLoadingSlots] = useTransition()
     const [state, formAction] = useActionState<BookingState, FormData>(bookAppointment, {})
+    const [onLeave, setOnLeave] = useState(false)
+   const router = useRouter()
+const searchParams = useSearchParams()
+const rescheduleAppointmentId = searchParams.get("rescheduleAppointmentId")
+const [rescheduling, setRescheduling] = useState(false)
 
     useEffect(() => {
-        if (!active) return
+    if (!active) return
 
-        startLoadingSlots(async () => {
-            const res = await getAvailableSlots(doctorId, selectedDate)
-            setSlots(res.slots ?? [])
-        })
-    }, [selectedDate, doctorId, active])
-
+    startLoadingSlots(async () => {
+        const res = await getAvailableSlots(doctorId, selectedDate)
+        setSlots(res.slots ?? [])
+        setOnLeave(res.onLeave ?? false)
+    })
+}, [selectedDate, doctorId, active])
     function pickDate(value: string) {
         setSelectedTime(null)
         setSelectedDate(value)
     }
+    useEffect(() => {
+    if (!active) return
 
+    let cancelled = false
+
+    getDoctorLeaveDates(doctorId, days.map((day) => day.value))
+        .then((dates) => {
+            if (!cancelled) setLeaveDates(dates)
+        })
+        .catch((error) => {
+            console.error("Failed to load doctor leave dates:", error)
+        })
+
+    return () => {
+        cancelled = true
+    }
+}, [doctorId, active])
+   async function handleBookingSubmit(
+    event: React.FormEvent<HTMLFormElement>
+) {
+    if (!rescheduleAppointmentId) return
+
+    event.preventDefault()
+
+    if (!selectedTime) return
+
+    setRescheduling(true)
+
+    try {
+        const result = await rescheduleLeaveConflictAppointment(
+            rescheduleAppointmentId,
+            selectedDate,
+            selectedTime
+        )
+
+        if (!result.success) {
+            window.alert(
+                result.message ||
+                    (language === "ar"
+                        ? "تعذّرت إعادة جدولة الموعد."
+                        : "Could not reschedule the appointment.")
+            )
+            return
+        }
+
+        router.push("/appointments")
+        router.refresh()
+    } catch {
+        window.alert(
+            language === "ar"
+                ? "حدث خطأ أثناء إعادة جدولة الموعد."
+                : "An error occurred while rescheduling."
+        )
+    } finally {
+        setRescheduling(false)
+    }
+}
     if (state.success) {
         return (
             <Card className="sticky top-24 border-none shadow-lg bg-card">
@@ -126,7 +194,11 @@ export function BookingPanel({
                         {t(language, "This doctor is currently not accepting appointments.")}
                     </p>
                 ) : (
-                    <form action={formAction} className="space-y-6">
+                  <form
+    action={formAction}
+    onSubmit={handleBookingSubmit}
+    className="space-y-6"
+>
                         <input type="hidden" name="doctorId" value={doctorId} />
                         <input type="hidden" name="date" value={selectedDate} />
                         <input type="hidden" name="time" value={selectedTime ?? ""} />
@@ -142,12 +214,14 @@ export function BookingPanel({
                                         type="button"
                                         key={d.value}
                                         onClick={() => pickDate(d.value)}
-                                        className={cn(
-                                            "px-1 py-2 text-xs rounded-lg border transition-all flex flex-col items-center",
-                                            selectedDate === d.value
-                                                ? "bg-primary text-primary-foreground border-primary"
-                                                : "hover:border-primary hover:text-primary"
-                                        )}
+                                       className={cn(
+    "px-1 py-2 text-xs rounded-lg border transition-all flex flex-col items-center",
+    onLeave && selectedDate === d.value
+        ? "border-red-500 bg-red-50 text-red-700 dark:bg-red-950 dark:text-red-300"
+        : selectedDate === d.value
+            ? "bg-primary text-primary-foreground border-primary"
+            : "hover:border-primary hover:text-primary"
+)}
                                     >
                                         <span className="opacity-70">{d.weekday}</span>
                                         <span className="font-semibold">{d.label}</span>
@@ -192,10 +266,14 @@ export function BookingPanel({
                                 <div className="flex items-center justify-center py-8 text-muted-foreground">
                                     <Loader2 className="h-5 w-5 animate-spin" />
                                 </div>
-                            ) : slots.length === 0 ? (
-                                <p className="text-sm text-muted-foreground py-6 text-center border rounded-lg">
-                                    {t(language, "No available slots on this day.")}
-                                </p>
+                           ) : onLeave ? (
+    <p className="text-sm font-medium text-red-700 dark:text-red-300 py-6 px-3 text-center border border-red-300 bg-red-50 dark:bg-red-950 rounded-lg">
+        {t(language, "The doctor is on leave on this date. Please select another date.")}
+    </p>
+) : slots.length === 0 ? (
+    <p className="text-sm text-muted-foreground py-6 text-center border rounded-lg">
+        {t(language, "No available slots on this day.")}
+    </p>
                             ) : (
                                 <div className="grid grid-cols-3 gap-2">
                                     {slots.map((time) => (
@@ -231,10 +309,24 @@ export function BookingPanel({
                                 <span className="font-bold text-lg">${fee.toFixed(2)}</span>
                             </div>
 
-                            <BookButton
-                                disabled={!selectedTime}
-                                language={language}
-                            />
+                      {rescheduleAppointmentId ? (
+    <Button
+        type="submit"
+        disabled={!selectedTime || rescheduling}
+        className="w-full gap-2 py-6 text-lg"
+    >
+        {rescheduling && <Loader2 className="h-5 w-5 animate-spin" />}
+        {rescheduling
+            ? language === "ar"
+                ? "جارٍ إعادة الجدولة..."
+                : "Rescheduling..."
+            : language === "ar"
+              ? "تأكيد الموعد الجديد"
+              : "Confirm New Appointment"}
+    </Button>
+) : (
+    <BookButton disabled={!selectedTime} language={language} />
+)}
 
                             <p className="text-[10px] text-center text-muted-foreground px-4">
                                 {t(language, "You won't be charged yet. Payment is handled at the clinic.")}

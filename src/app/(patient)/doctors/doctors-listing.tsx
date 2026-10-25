@@ -76,24 +76,27 @@ export function DoctorsListing({
             return false
         }
 
-        const name = doctor.name.toLocaleLowerCase(
-            isArabic ? "ar" : "en"
-        )
-        const specialty = doctor.specialty.toLocaleLowerCase(
-            isArabic ? "ar" : "en"
-        )
-        const arabicSpecialty = (
-            specialtyMap[doctor.specialty] ?? ""
-        ).toLocaleLowerCase("ar")
+       
+const name = doctor.name.toLocaleLowerCase(
+    isArabic ? "ar" : "en"
+)
+const arabicName = (doctor.nameAr ?? "").toLocaleLowerCase("ar")
 
-        if (
-            term &&
-            !name.includes(term) &&
-            !specialty.includes(term) &&
-            !arabicSpecialty.includes(term)
-        ) {
-            return false
-        }
+const specialty = doctor.specialty.toLocaleLowerCase("en")
+const arabicSpecialty = (
+    specialtyMap[doctor.specialty] ?? ""
+).toLocaleLowerCase("ar")
+
+if (
+    term &&
+    !name.includes(term) &&
+    !arabicName.includes(term) &&
+    !specialty.includes(term) &&
+    !arabicSpecialty.includes(term)
+) {
+    return false
+}
+
 
         return true
     })

@@ -10,6 +10,7 @@ export interface IAppointment extends Document {
   price: number;
   notes?: string;
   cancellationReason?: string;
+  leaveConflict?: boolean;
   /** When the admin marked the patient as arrived (visit started). */
   startedAt?: Date;
   /** When the admin marked the visit finished. */
@@ -66,6 +67,10 @@ const AppointmentSchema = new Schema<IAppointment>(
   type: String,
   trim: true,
     },
+    leaveConflict: {
+  type: Boolean,
+  default: false,
+},
   },
   {
     timestamps: true,

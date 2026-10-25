@@ -34,7 +34,11 @@ function stampTime(d?: Date | null): string | undefined {
     return new Date(d).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" })
 }
 
-type PopulatedName = { name?: string; specialty?: string } | null
+type PopulatedName = {
+    name?: string
+    nameAr?: string
+    specialty?: string
+} | null
 
 export default async function AdminAppointmentsPage() {
     await requireRole("admin")
@@ -43,12 +47,18 @@ export default async function AdminAppointmentsPage() {
     const [docs, patientDocs, doctorDocs] = await Promise.all([
         Appointment.find()
             .populate<{ patient: PopulatedName }>("patient", "name")
-            .populate<{ doctor: PopulatedName }>("doctor", "name specialty")
+            .populate<{ doctor: PopulatedName }>(
+    "doctor",
+    "name nameAr specialty"
+)
             // Soonest upcoming first is what an admin working the schedule wants.
             .sort({ date: 1, time: 1 })
             .lean(),
         User.find({ role: "patient" }).select("name email").sort({ name: 1 }).lean(),
-        Doctor.find({ status: "active" }).select("name specialty").sort({ name: 1 }).lean(),
+        Doctor.find({ status: "active" })
+    .select("name nameAr specialty")
+    .sort({ name: 1 })
+    .lean(),
     ])
 
    
@@ -61,17 +71,19 @@ export default async function AdminAppointmentsPage() {
 
    
     const doctors: DoctorOption[] = doctorDocs.map((d) => ({
-        id: String(d._id),
-        name: d.name,
-        specialty: d.specialty,
-    }))
+    id: String(d._id),
+    name: d.name,
+    nameAr: d.nameAr?.trim() || "",
+    specialty: d.specialty,
+}))
 
     const appointments: AdminAppointment[] = docs.map((a) => ({
         id: String(a._id),
         scheduledDate: `${new Date(a.date).toISOString().slice(0, 10)}T${a.time}:00+03:00`,
         patient: a.patient?.name ?? "Unknown patient",
-        doctor: a.doctor?.name ?? "Unknown doctor",
-        specialty: a.doctor?.specialty ?? "",
+       doctor: a.doctor?.name ?? "Unknown doctor",
+doctorNameAr: a.doctor?.nameAr?.trim() || "",
+specialty: a.doctor?.specialty ?? "",  
         date: dateFmt.format(new Date(a.date)),
         time: to12h(a.time),
         endTime: to12h(slotEnd(a.time)),

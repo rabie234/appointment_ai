@@ -28,7 +28,10 @@ import { dayOfWeek, normalizeWeek, slotsForDay } from "@/lib/schedule"
 import Appointment, { type IAppointment } from "@/models/Appointment"
 import Doctor from "@/models/Doctor"
 import User from "@/models/User"
-
+import {
+    DashboardText,
+    DashboardStatNote,
+} from "./dashboard-translations"
 // Every number here is live; never serve a cached snapshot.
 export const dynamic = "force-dynamic"
 
@@ -273,17 +276,17 @@ export default async function AdminDashboardPage() {
         <div className="space-y-8 animate-in fade-in duration-500">
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
                 <div>
-                    <h1 className="text-3xl font-bold tracking-tight">Dashboard Overview</h1>
+                    <h1 className="text-3xl font-bold tracking-tight"><DashboardText text="Dashboard Overview" /></h1>
                     <p className="text-muted-foreground mt-1">
-                        Welcome back, {session.user.name ?? "Admin"}. Here&apos;s what&apos;s happening today.
+                        <DashboardText text="Welcome back" />, {session.user.name ?? "Admin"}. <DashboardText text="Here's what's happening today." />
                     </p>
                 </div>
                 <div className="flex items-center gap-3">
                     <Link href="/admin/reports" className="hidden sm:flex">
-                        <Button variant="outline">View Reports</Button>
+                        <Button variant="outline"><DashboardText text="View Reports" /></Button>
                     </Link>
                     <Link href="/admin/appointments">
-                        <Button className="shadow-lg shadow-blue-200">Manage Appointments</Button>
+                        <Button className="shadow-lg shadow-blue-200"><DashboardText text="Manage Appointments" /></Button>
                     </Link>
                 </div>
             </div>
@@ -293,7 +296,7 @@ export default async function AdminDashboardPage() {
                 {stats.map((stat) => (
                     <Card key={stat.title} className="border-none shadow-sm bg-card/60 backdrop-blur-sm group hover:shadow-md transition-all">
                         <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                            <CardTitle className="text-sm font-medium text-muted-foreground">{stat.title}</CardTitle>
+                            <CardTitle className="text-sm font-medium text-muted-foreground"><DashboardText text={stat.title} /></CardTitle>
                             <div className={`${stat.bg} ${stat.color} p-2 rounded-xl transition-transform group-hover:scale-110`}>
                                 <stat.icon className="h-5 w-5" />
                             </div>
@@ -302,9 +305,34 @@ export default async function AdminDashboardPage() {
                             <div className="text-2xl font-bold">{stat.value.toLocaleString()}</div>
                             {stat.delta ? (
                                 <DeltaLine delta={stat.delta} />
-                            ) : stat.note ? (
-                                <p className="mt-1 text-xs text-muted-foreground">{stat.note}</p>
-                            ) : null}
+                           ) : stat.note ? (
+    <p className="mt-1 text-xs text-muted-foreground">
+        {stat.title === "Active Doctors" && (
+            <DashboardStatNote
+                kind="doctors"
+                first={onLeave}
+                second={inactiveDoctors}
+            />
+        )}
+
+        {stat.title === "Today's Appointments" && (
+            <DashboardStatNote
+                kind="today"
+                first={todayCompleted}
+                second={todayRemaining}
+            />
+        )}
+
+        {stat.title === "Active Patients" && (
+            <DashboardStatNote
+                kind="patients"
+                first={registeredPatients}
+                second={newPatients}
+                third={COMPARE_DAYS}
+            />
+        )}
+    </p>
+) : null}
                         </CardContent>
                     </Card>
                 ))}
@@ -315,33 +343,33 @@ export default async function AdminDashboardPage() {
                 <Card className="lg:col-span-2 border-none shadow-sm bg-card/60">
                     <CardHeader className="flex flex-row items-center justify-between">
                         <div>
-                            <CardTitle className="text-xl">Upcoming Appointments</CardTitle>
+                            <CardTitle className="text-xl"><DashboardText text="Upcoming Appointments" /></CardTitle>
                             <p className="text-sm text-muted-foreground mt-1">
                                 {upcomingTotal === 0
-                                    ? "Nothing scheduled for today or tomorrow."
-                                    : `${upcomingTotal} scheduled for today and tomorrow.`}
+                                    ? <DashboardText text="Nothing scheduled for today or tomorrow." />
+                                    : <><span>{upcomingTotal} </span><DashboardText text="scheduled for today and tomorrow." /></>}
                             </p>
                         </div>
                         <Link href="/admin/appointments">
-                            <Button variant="ghost" size="sm" className="text-primary font-bold">View All</Button>
+                            <Button variant="ghost" size="sm" className="text-primary font-bold"><DashboardText text="View All" /></Button>
                         </Link>
                     </CardHeader>
                     <CardContent className="p-0">
                         <Table>
                             <TableHeader>
                                 <TableRow className="hover:bg-transparent border-muted/50">
-                                    <TableHead className="pl-6">Patient</TableHead>
-                                    <TableHead>Doctor</TableHead>
-                                    <TableHead>Date & Time</TableHead>
-                                    <TableHead>Status</TableHead>
-                                    <TableHead className="text-right pr-6">Action</TableHead>
+                                    <TableHead className="pl-6"><DashboardText text="Patient" /></TableHead>
+                                    <TableHead><DashboardText text="Doctor" /></TableHead>
+                                    <TableHead><DashboardText text="Date & Time" /></TableHead>
+                                    <TableHead><DashboardText text="Status" /></TableHead>
+                                    <TableHead className="text-right pr-6"><DashboardText text="Action" /></TableHead>
                                 </TableRow>
                             </TableHeader>
                             <TableBody>
                                 {upcoming.length === 0 ? (
                                     <TableRow>
                                         <TableCell colSpan={5} className="text-center py-12 text-muted-foreground">
-                                            No upcoming appointments in the next two days.
+                                            <DashboardText text="No upcoming appointments in the next two days." />
                                         </TableCell>
                                     </TableRow>
                                 ) : (
@@ -356,7 +384,7 @@ export default async function AdminDashboardPage() {
                                             </TableCell>
                                             <TableCell className="text-xs font-semibold">{app.when}</TableCell>
                                             <TableCell>
-                                                <Badge variant={badgeVariant(app.status)}>{STATUS_LABEL[app.status]}</Badge>
+                                                <Badge variant={badgeVariant(app.status)}><DashboardText text={STATUS_LABEL[app.status]} /></Badge>
                                             </TableCell>
                                             <TableCell className="text-right pr-6">
                                                 <Link href="/admin/appointments" title="Manage in Appointments">
@@ -379,11 +407,13 @@ export default async function AdminDashboardPage() {
                         <Activity className="h-32 w-32 text-primary" />
                     </div>
                     <CardHeader>
-                        <CardTitle className="text-xl">This Week&apos;s Capacity</CardTitle>
+                        <CardTitle className="text-xl">
+    <DashboardText text="This Week's Capacity" />
+</CardTitle>
                         <p className="text-sm text-muted-foreground mt-1">
                             {weekSlots === 0
-                                ? "No doctor working hours are set for this week."
-                                : `${weekBooked} of ${weekSlots} slots booked (${Math.round((weekBooked / weekSlots) * 100)}%).`}
+                                ? <DashboardText text="No doctor working hours are set for this week." />
+                                : <><span>{weekBooked} / {weekSlots} </span><DashboardText text="slots booked" /> ({Math.round((weekBooked / weekSlots) * 100)}%).</>}
                         </p>
                     </CardHeader>
                     <CardContent>
@@ -394,7 +424,7 @@ export default async function AdminDashboardPage() {
                         </div>
                         <Link href="/admin/reports">
                             <Button variant="outline" className="w-full mt-8 border-primary/20 text-primary hover:bg-primary/5">
-                                View Full Reports
+                                <DashboardText text="View Full Reports" />
                             </Button>
                         </Link>
                     </CardContent>
@@ -440,17 +470,17 @@ function CapacityMeter({ day }: { day: CapacityDay }) {
                     <span className="font-normal normal-case tracking-normal text-muted-foreground">{day.date}</span>
                     {day.isToday && (
                         <span className="rounded-full bg-primary/10 px-1.5 py-0.5 text-[10px] font-semibold normal-case tracking-normal text-primary">
-                            Today
+                            <DashboardText text="Today" />
                         </span>
                     )}
                 </span>
                 <span className="text-muted-foreground">
                     {closed ? (
-                        "Closed"
+                        <DashboardText text="Closed" />
                     ) : (
                         <>
                             {day.booked}/{day.slots} · {pct}%
-                            {nearlyFull && <span className="ml-1 font-semibold text-amber-700 dark:text-amber-400">{pct === 100 ? "Full" : "Nearly full"}</span>}
+                            {nearlyFull && <span className="ml-1 font-semibold text-amber-700 dark:text-amber-400"><DashboardText text={pct === 100 ? "Full" : "Nearly full"} /></span>}
                         </>
                     )}
                 </span>

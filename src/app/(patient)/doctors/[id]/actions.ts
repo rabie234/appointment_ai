@@ -12,6 +12,7 @@ import {
 } from '@/lib/schedule';
 import Doctor from '@/models/Doctor';
 import Appointment from '@/models/Appointment';
+import DoctorLeave from '@/models/DoctorLeave';
 
 /** Parse a "YYYY-MM-DD" value into a UTC date at midnight. null if malformed. */
 function parseDay(value: string): Date | null {
@@ -41,9 +42,28 @@ async function bookedTimes(doctorId: string, date: Date): Promise<Set<string>> {
     .lean();
   return new Set(existing.map((a) => a.time));
 }
+async function isDoctorOnLeave(
+  doctorId: string,
+  date: Date
+): Promise<boolean> {
+  const { start, end } = dayBounds(date);
 
-export type SlotsResult = { slots?: string[]; error?: string };
+  const leave = await DoctorLeave.findOne({
+    doctor: doctorId,
+    startDate: { $lt: end },
+    endDate: { $gt: start },
+  })
+    .select('_id')
+    .lean();
 
+  return Boolean(leave);
+}
+
+export type SlotsResult = {
+  slots?: string[];
+  error?: string;
+  onLeave?: boolean;
+};
 /**
  * Free slots for a doctor on a date. Read-only, but still requires a signed-in
  * patient — slot availability shouldn't leak to the public.
@@ -57,16 +77,58 @@ export async function getAvailableSlots(
   const date = parseDay(dateStr);
   if (!date) return { error: 'Invalid date' };
 
+  
   await connectDB();
 
   const doctor = await Doctor.findById(doctorId).select('schedule status').lean();
   if (!doctor) return { error: 'Doctor not found' };
   if (doctor.status !== 'active') return { slots: [] };
-
+  if (await isDoctorOnLeave(doctorId, date)) {
+  return { slots: [], onLeave: true };
+}
   const schedule = normalizeWeek(doctor.schedule);
   const taken = await bookedTimes(doctorId, date);
   return { slots: availableSlots(schedule, date, taken) };
 }
+
+export async function getDoctorLeaveDates(
+  doctorId: string,
+  dateStrings: string[]
+): Promise<string[]> {
+  await requireRole("patient");
+  await connectDB();
+
+  const dates = dateStrings
+    .map(parseDay)
+    .filter((date): date is Date => date !== null);
+
+  if (dates.length === 0) return [];
+
+  const firstDay = new Date(Math.min(...dates.map((d) => d.getTime())));
+  const lastDay = new Date(Math.max(...dates.map((d) => d.getTime())));
+  lastDay.setUTCDate(lastDay.getUTCDate() + 1);
+
+  const leaves = await DoctorLeave.find({
+    doctor: doctorId,
+    startDate: { $lt: lastDay },
+    endDate: { $gt: firstDay },
+  })
+    .select("startDate endDate")
+    .lean();
+
+  return dates
+    .filter((date) =>
+      leaves.some((leave) => {
+        const start = new Date(leave.startDate);
+        const end = new Date(leave.endDate);
+        start.setUTCHours(0, 0, 0, 0);
+        end.setUTCHours(0, 0, 0, 0);
+        return date >= start && date < end;
+      })
+    )
+    .map((date) => date.toISOString().slice(0, 10));
+}
+
 
 export type BookingState = { error?: string; success?: boolean };
 
@@ -109,7 +171,11 @@ export async function bookAppointment(
   const doctor = await Doctor.findById(doctorId).select('schedule status').lean();
   if (!doctor) return { error: 'Doctor not found' };
   if (doctor.status !== 'active') return { error: 'This doctor is not accepting appointments' };
-
+  if (await isDoctorOnLeave(doctorId, date)) {
+  return {
+    error: 'The doctor is on leave on this date. Please choose another date.',
+  };
+}
   // The requested time must be a real slot in the doctor's schedule for that day.
   const schedule = normalizeWeek(doctor.schedule);
   const day = dayOfWeek(date);

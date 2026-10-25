@@ -11,6 +11,7 @@ import {
     BarChart3,
     BrainCircuit,
     HeartPulse,
+    CalendarOff,
 } from "lucide-react"
 import { LogoutButton } from "./logout-button"
 import { cn } from "@/lib/utils"
@@ -21,6 +22,7 @@ import { t } from "@/components/i18n/translations"
 const adminNavItems = [
     { name: "Dashboard", href: "/admin/dashboard", icon: LayoutDashboard },
     { name: "Doctors", href: "/admin/doctors", icon: Users },
+    { name: "Doctor Leaves", href: "/admin/doctor-leaves", icon: CalendarOff },
     { name: "Appointments", href: "/admin/appointments", icon: Calendar },
     { name: "Patients", href: "/admin/patients", icon: UserRound },
     { name: "AI Training", href: "/admin/ai-training", icon: BrainCircuit },
@@ -33,21 +35,26 @@ export function AdminSidebar() {
     const { language } = useLanguage()
 
     return (
-        <aside className="hidden lg:flex flex-col w-64 border-r bg-card h-screen sticky top-0 overflow-hidden">
+        <aside className="hidden lg:flex flex-col w-64 border-r rtl:border-r-0 rtl:border-l bg-card h-screen sticky top-0 overflow-hidden">
             <div className="p-6 border-b flex items-center space-x-2">
                 <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-primary text-primary-foreground shadow-lg shadow-blue-200">
                     <HeartPulse className="h-6 w-6" />
                 </div>
                 <div>
                     <span className="text-xl font-bold tracking-tight text-primary">ClinicAI</span>
-                    <p className="text-[10px] text-muted-foreground font-semibold uppercase tracking-widest">{t(language, "Admin Panel")}</p>
+                    <p className="text-[10px] text-muted-foreground font-semibold uppercase tracking-widest">
+                        {t(language, "Admin Panel")}
+                    </p>
                 </div>
             </div>
 
             <nav className="flex-1 overflow-y-auto p-4 space-y-1">
                 {adminNavItems.map((item) => {
                     const Icon = item.icon
-                    const isActive = pathname === item.href || (item.href !== "/admin" && pathname.startsWith(item.href))
+                    const isActive =
+                        pathname === item.href ||
+                        (item.href !== "/admin" && pathname.startsWith(item.href))
+
                     return (
                         <Link
                             key={item.name}
@@ -59,7 +66,14 @@ export function AdminSidebar() {
                                     : "text-muted-foreground hover:bg-accent hover:text-accent-foreground"
                             )}
                         >
-                            <Icon className={cn("h-5 w-5", isActive ? "text-primary-foreground" : "text-primary group-hover:scale-110 transition-transform")} />
+                            <Icon
+                                className={cn(
+                                    "h-5 w-5",
+                                    isActive
+                                        ? "text-primary-foreground"
+                                        : "text-primary group-hover:scale-110 transition-transform"
+                                )}
+                            />
                             <span>{t(language, item.name)}</span>
                         </Link>
                     )
@@ -73,6 +87,3 @@ export function AdminSidebar() {
         </aside>
     )
 }
-
-
-

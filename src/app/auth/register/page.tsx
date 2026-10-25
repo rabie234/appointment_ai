@@ -10,7 +10,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { HeartPulse, Loader2 } from "lucide-react"
 import { useLanguage } from "@/components/i18n/language-provider"
 import { t } from "@/components/i18n/translations"
-
+import { LanguageSwitcher } from "@/components/i18n/language-switcher"
 const fields = [
     { id: "name", label: "Full Name", type: "text", placeholder: "John Doe", autoComplete: "name" },
     { id: "email", label: "Email", type: "email", placeholder: "name@example.com", autoComplete: "email" },
@@ -47,8 +47,8 @@ export default function RegisterPage() {
                             <HeartPulse className="h-7 w-7" />
                         </div>
                     </div>
-                    <CardTitle className="text-2xl font-bold">Create an account</CardTitle>
-                    <CardDescription>Sign up to get started with ClinicAI</CardDescription>
+                    <CardTitle className="text-2xl font-bold"> {t(language,"Create an account")}</CardTitle>
+                    <CardDescription>{t(language,"Sign up to get started with ClinicAI")}</CardDescription>
                 </CardHeader>
                 <CardContent>
                     <form action={formAction} className="space-y-4">
@@ -82,9 +82,9 @@ export default function RegisterPage() {
                         <SubmitButton />
                     </form>
                     <div className="mt-4 text-center text-sm">
-                        <span className="text-muted-foreground">Already have an account? </span>
+                        <span className="text-muted-foreground"> {t(language, "Already have an account?")}  </span>
                         <Link href="/auth/login" className="text-primary font-medium hover:underline">
-                            Sign in
+                            {t(language,"Sign in")}
                         </Link>
                     </div>
                 </CardContent>

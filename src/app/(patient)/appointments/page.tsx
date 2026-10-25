@@ -47,6 +47,7 @@ const STATUS_LABEL: Record<Status, string> = {
 }
 
 type PopulatedDoctor = {
+    _id: string | { toString(): string }
     name?: string
     nameAr?: string
     specialty?: string
@@ -69,6 +70,8 @@ export default async function MyAppointmentsPage() {
 
         return {
             id: String(a._id),
+            doctorId: String(a.doctor?._id ?? a.doctor),
+            leaveConflict: a.leaveConflict ?? false,
             doctor: a.doctor?.name ?? "Unknown doctor",
             doctorAr: a.doctor?.nameAr ?? "",
             specialty: a.doctor?.specialty ?? "",

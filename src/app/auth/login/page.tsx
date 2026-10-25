@@ -11,7 +11,7 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { HeartPulse, Loader2, CheckCircle2 } from "lucide-react"
-
+import { LanguageSwitcher } from "@/components/i18n/language-switcher"
 function SubmitButton() {
     const { pending } = useFormStatus()
     const { language } = useLanguage()
@@ -68,7 +68,7 @@ function LoginForm() {
             </div>
             <div className="space-y-2">
                 <label htmlFor="password" className="text-sm font-medium">
-                    Password
+                    {t(language, "Password")}
                 </label>
                 <Input
                     id="password"
@@ -89,26 +89,34 @@ function LoginForm() {
 export default function LoginPage() {
     const { language } = useLanguage()
     return (
-        <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-primary/5 via-background to-background p-4">
-            <Card className="w-full max-w-md border-none shadow-xl bg-card/60 backdrop-blur-sm">
-                <CardHeader className="space-y-1 text-center">
-                    <div className="flex justify-center mb-4">
-                        <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-primary text-primary-foreground shadow-lg">
-                            <HeartPulse className="h-7 w-7" />
-                        </div>
-                    </div>
-                    <CardTitle className="text-2xl font-bold">Welcome back</CardTitle>
-                    <CardDescription>Sign in to your ClinicAI account</CardDescription>
-                </CardHeader>
+        <div className="relative min-h-screen flex items-center justify-center bg-gradient-to-br from-primary/5 via-background to-background p-4">
+    <div className="absolute top-4 right-4 z-10">
+        <LanguageSwitcher />
+    </div>
+
+    <Card className="w-full max-w-md border-none shadow-xl bg-card/60 backdrop-blur-sm">
+        <CardHeader className="space-y-1 text-center">
+            <div className="flex justify-center mb-4">
+                <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-primary text-primary-foreground shadow-lg">
+                    <HeartPulse className="h-7 w-7" />
+                </div>
+            </div>
+            <CardTitle className="text-2xl font-bold">
+                {t(language, "Welcome back")}
+            </CardTitle>
+            <CardDescription>
+                {t(language, "Sign in to your ClinicAI account")}
+            </CardDescription>
+        </CardHeader>
                 <CardContent>
                     {/* useSearchParams needs a Suspense boundary during prerender. */}
                     <Suspense fallback={<div className="h-64" />}>
                         <LoginForm />
                     </Suspense>
                     <div className="mt-4 text-center text-sm">
-                        <span className="text-muted-foreground">Don&apos;t have an account? </span>
+                        <span className="text-muted-foreground">  {t(language, "Don't have an account?")} </span>
                         <Link href="/auth/register" className="text-primary font-medium hover:underline">
-                            Sign up
+                            {t(language, "Sign up")}
                         </Link>
                     </div>
                 </CardContent>
