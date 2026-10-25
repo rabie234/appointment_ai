@@ -1,9 +1,8 @@
 "use client"
 
-import { Search, Bell, User, MessageSquare } from "lucide-react"
+import { Search, User } from "lucide-react"
 import type { Session } from "next-auth"
 import { Input } from "@/components/ui/input"
-import { Button } from "@/components/ui/button"
 
 export function AdminTopbar({ user }: { user: Session["user"] }) {
     return (
@@ -19,27 +18,14 @@ export function AdminTopbar({ user }: { user: Session["user"] }) {
             </div>
 
             <div className="flex items-center gap-3">
-                <Button variant="ghost" size="icon" className="relative h-10 w-10 text-muted-foreground hover:text-primary rounded-xl">
-                    <MessageSquare className="h-5 w-5" />
-                    <span className="absolute top-2 right-2 h-2 w-2 rounded-full bg-primary border-2 border-background" />
-                </Button>
-                <Button variant="ghost" size="icon" className="relative h-10 w-10 text-muted-foreground hover:text-primary rounded-xl">
-                    <Bell className="h-5 w-5" />
-                    <span className="absolute top-2 right-2 h-2 w-2 rounded-full bg-destructive border-2 border-background" />
-                </Button>
-
-                <div className="h-8 w-[1px] bg-border mx-2" />
-
-                <div className="flex items-center gap-3 pl-2">
-                    <div className="text-right hidden sm:block">
-                        <p className="text-sm font-bold leading-tight">{user.name}</p>
-                        <p className="text-[10px] text-muted-foreground font-medium uppercase tracking-tighter">
-                            {user.email}
-                        </p>
-                    </div>
-                    <div className="h-10 w-10 rounded-xl bg-primary/10 flex items-center justify-center border-2 border-primary/20">
-                        <User className="h-6 w-6 text-primary" />
-                    </div>
+                <div className="text-right hidden sm:block">
+                    <p className="text-sm font-bold leading-tight">{user.name}</p>
+                    <p className="text-[10px] text-muted-foreground font-medium uppercase tracking-tighter">
+                        {user.email}
+                    </p>
+                </div>
+                <div className="h-10 w-10 rounded-xl bg-primary/10 flex items-center justify-center border-2 border-primary/20">
+                    <User className="h-6 w-6 text-primary" />
                 </div>
             </div>
         </header>
