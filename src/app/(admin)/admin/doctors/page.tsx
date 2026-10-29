@@ -28,6 +28,7 @@ export default async function AdminDoctorsPage() {
     const doctors: DoctorRow[] = doctorDocs.map((d) => ({
         id: String(d._id),
         name: d.name,
+        nameAr: d.nameAr?.trim() || "",
         specialty: d.specialty,
         email: d.email,
         phone: d.phone ?? "",
@@ -41,6 +42,7 @@ export default async function AdminDoctorsPage() {
     const specialties: SpecialtyRow[] = specialtyDocs.map((s) => ({
         id: String(s._id),
         name: s.name,
+        nameAr: s.nameAr?.trim() || "",
         description: s.description ?? "",
     }))
 

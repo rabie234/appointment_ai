@@ -48,6 +48,7 @@ import { t } from "@/components/i18n/translations"
 export type DoctorRow = {
     id: string
     name: string
+    nameAr: string
     specialty: string
     email: string
     phone: string
@@ -61,6 +62,7 @@ export type DoctorRow = {
 export type SpecialtyRow = {
     id: string
     name: string
+    nameAr: string
     description: string
 }
 
@@ -124,14 +126,24 @@ function DoctorDialog({
                     <input type="hidden" name="id" value={doctor.id} />
                 )}
 
-                <Field label={t(language, "Full Name")}>
-                    <Input
-                        name="name"
-                        defaultValue={doctor?.name}
-                        placeholder="Dr. Jane Doe"
-                        required
-                    />
-                </Field>
+<Field label={t(language, "Full Name")}>
+    <Input
+        name="name"
+        defaultValue={doctor?.name}
+        placeholder="Dr. Jane Doe"
+        required
+    />
+</Field>
+
+<Field label={t(language, "Arabic Name")}>
+    <Input
+        name="nameAr"
+        defaultValue={doctor?.nameAr ?? ""}
+        placeholder="د. أحمد محمد"
+        dir="rtl"
+    />
+</Field>
+
 
                 <Field label={t(language, "Specialty")}>
                     <select
@@ -146,7 +158,9 @@ function DoctorDialog({
 
                         {specialties.map((specialty) => (
                             <option key={specialty.id} value={specialty.name}>
-                                {specialty.name}
+                                {language === "ar" && specialty.nameAr
+    ? specialty.nameAr
+    : specialty.name}
                             </option>
                         ))}
 
@@ -156,7 +170,9 @@ function DoctorDialog({
                                     specialty.name === doctor.specialty
                             ) && (
                                 <option value={doctor.specialty}>
-                                    {doctor.specialty}
+                                   {language === "ar"
+    ? specialties.find((s) => s.name === doctor.specialty)?.nameAr || doctor.specialty
+    : doctor.specialty}
                                 </option>
                             )}
                     </select>
@@ -287,7 +303,9 @@ function DoctorLeaveDialog({
                             .filter((doctor) => doctor.status === "active")
                             .map((doctor) => (
                                 <option key={doctor.id} value={doctor.id}>
-                                    {doctor.name} — {doctor.specialty}
+                                    {language === "ar" && doctor.nameAr
+  ? doctor.nameAr
+  : doctor.name} — {doctor.specialty}
                                 </option>
                             ))}
                     </select>
@@ -465,24 +483,32 @@ function SpecialtiesDialog({
                     action={formAction}
                     className="space-y-3"
                 >
-                    <div className="grid grid-cols-1 gap-3 sm:grid-cols-[1fr_1.5fr_auto]">
-                        <Input
-                            name="name"
-                            placeholder={t(language, "Specialty name")}
-                            required
-                        />
-                        <Input
-                            name="description"
-                            placeholder={t(
-                                language,
-                                "Short description (optional)"
-                            )}
-                        />
-                        <SubmitButton>
-                            <Plus className="h-4 w-4" />
-                            {t(language, "Add")}
-                        </SubmitButton>
-                    </div>
+                    <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+    <Input
+        name="name"
+        placeholder={t(language, "Specialty name")}
+        required
+    />
+
+    <Input
+        name="nameAr"
+        placeholder="اسم التخصص بالعربية"
+        dir="rtl"
+    />
+
+    <Input
+        name="description"
+        placeholder={t(
+            language,
+            "Short description (optional)"
+        )}
+    />
+
+    <SubmitButton>
+        <Plus className="h-4 w-4" />
+        {t(language, "Add")}
+    </SubmitButton>
+</div>
 
                     {state.error && (
                         <p className="text-sm font-medium text-destructive">
@@ -503,9 +529,14 @@ function SpecialtiesDialog({
                                 className="flex items-center justify-between gap-3 px-4 py-3"
                             >
                                 <div className="min-w-0">
-                                    <p className="truncate font-semibold">
-                                        {specialty.name}
-                                    </p>
+                                    <p
+    className="truncate font-semibold"
+    dir={language === "ar" ? "rtl" : "ltr"}
+>
+    {language === "ar" && specialty.nameAr
+        ? specialty.nameAr
+        : specialty.name}
+</p>
                                     {specialty.description && (
                                         <p className="truncate text-xs text-muted-foreground">
                                             {specialty.description}
@@ -718,7 +749,14 @@ export function DoctorsManager({
                                             </div>
                                             <div>
                                                 <span className="block font-bold">
-                                                    {doctor.name}
+                                            <span
+    className="block font-bold"
+    dir={language === "ar" ? "rtl" : "ltr"}
+>
+    {language === "ar" && doctor.nameAr
+        ? doctor.nameAr
+        : doctor.name}
+</span>
                                                 </span>
                                                 <span className="text-xs text-muted-foreground">
                                                     {doctor.email}
@@ -728,7 +766,13 @@ export function DoctorsManager({
                                     </TableCell>
 
                                     <TableCell className="font-medium text-primary">
-                                        {doctor.specialty}
+                                       <TableCell className="font-medium text-primary">
+    {language === "ar"
+        ? specialties.find(
+              (s) => s.name === doctor.specialty
+          )?.nameAr || doctor.specialty
+        : doctor.specialty}
+</TableCell>
                                     </TableCell>
 
                                     <TableCell className="text-sm text-muted-foreground">

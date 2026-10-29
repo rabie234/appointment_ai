@@ -222,6 +222,7 @@ export async function updateDoctorSchedule(
 
 export type SpecialtyFormState = { error?: string; success?: boolean };
 
+
 export async function createSpecialty(
   _prev: SpecialtyFormState,
   formData: FormData
@@ -229,9 +230,14 @@ export async function createSpecialty(
   await requireRole('admin');
 
   const name = String(formData.get('name') ?? '').trim();
+  const submittedNameAr = String(
+    formData.get('nameAr') ?? ''
+  ).trim();
   const description = String(formData.get('description') ?? '').trim();
 
-  if (!name) return { error: 'Specialty name is required' };
+  if (!name) {
+    return { error: 'Specialty name is required' };
+  }
 
   await connectDB();
 
@@ -240,26 +246,28 @@ export async function createSpecialty(
   }
 
   try {
-    let nameAr = '';
+    let nameAr = submittedNameAr;
 
-try {
-  const result = await genai.models.generateContent({
-    model: GEMINI_MODEL,
-    contents: `Translate this medical specialty name into accurate Arabic.
+    if (!nameAr) {
+      try {
+        const result = await genai.models.generateContent({
+          model: GEMINI_MODEL,
+          contents: `Translate this medical specialty name into accurate Arabic.
 Return only the Arabic translation, with no explanation.
 Specialty: ${name}`,
-  });
+        });
 
-  nameAr = result.text?.trim() ?? '';
-} catch (error) {
-  console.error('Specialty translation failed:', error);
-}
+        nameAr = result.text?.trim() ?? '';
+      } catch (error) {
+        console.error('Specialty translation failed:', error);
+      }
+    }
 
-await Specialty.create({
-  name,
-  nameAr: nameAr || undefined,
-  description: description || undefined,
-});
+    await Specialty.create({
+      name,
+      nameAr: nameAr || undefined,
+      description: description || undefined,
+    });
   } catch (error) {
     console.error('Create specialty failed:', error);
     return { error: 'Could not create specialty. Please try again.' };
@@ -268,6 +276,7 @@ await Specialty.create({
   revalidatePath('/admin/doctors');
   return { success: true };
 }
+
 
 export async function deleteSpecialty(id: string): Promise<SpecialtyFormState> {
   await requireRole('admin');
@@ -287,3 +296,4 @@ export async function deleteSpecialty(id: string): Promise<SpecialtyFormState> {
   revalidatePath('/admin/doctors');
   return { success: true };
 }
+
