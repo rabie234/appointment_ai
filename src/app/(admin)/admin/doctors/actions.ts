@@ -234,7 +234,9 @@ export async function createSpecialty(
     formData.get('nameAr') ?? ''
   ).trim();
   const description = String(formData.get('description') ?? '').trim();
-
+  const descriptionAr = String(
+  formData.get('descriptionAr') ?? ''
+).trim();
   if (!name) {
     return { error: 'Specialty name is required' };
   }
@@ -262,12 +264,28 @@ Specialty: ${name}`,
         console.error('Specialty translation failed:', error);
       }
     }
+   let descriptionArFinal = descriptionAr;
 
-    await Specialty.create({
-      name,
-      nameAr: nameAr || undefined,
-      description: description || undefined,
+if (description && !descriptionArFinal) {
+  try {
+    const result = await genai.models.generateContent({
+      model: GEMINI_MODEL,
+      contents: `Translate this medical specialty description into accurate, natural Arabic.
+Return only the Arabic translation, with no explanation.
+Description: ${description}`,
     });
+
+    descriptionArFinal = result.text?.trim() ?? '';
+  } catch (error) {
+    console.error('Specialty description translation failed:', error);
+  }
+}
+    await Specialty.create({
+  name,
+  nameAr: nameAr || undefined,
+  description: description || undefined,
+  descriptionAr: descriptionArFinal || undefined,
+});
   } catch (error) {
     console.error('Create specialty failed:', error);
     return { error: 'Could not create specialty. Please try again.' };

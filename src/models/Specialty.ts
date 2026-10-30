@@ -4,6 +4,7 @@ export interface ISpecialty extends Document {
   name: string;
   nameAr?: string;
   description?: string;
+  descriptionAr?: string;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -21,9 +22,14 @@ const SpecialtySchema = new Schema<ISpecialty>(
   trim: true,
 },
     description: {
-      type: String,
-      trim: true,
-    },
+  type: String,
+  trim: true,
+},
+descriptionAr: {
+  type: String,
+  trim: true,
+  default: "",
+},
     
   },
   {

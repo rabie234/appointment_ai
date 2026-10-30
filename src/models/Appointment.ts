@@ -1,4 +1,5 @@
 import mongoose, { Schema, Document, Model } from 'mongoose';
+import '@/models/Doctor';
 
 export interface IAppointment extends Document {
   patient: mongoose.Types.ObjectId;

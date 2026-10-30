@@ -62,3 +62,83 @@ export function DashboardStatNote({
         </span>
     );
 }
+export function DashboardTime({ time }: { time: string }) {
+  const { language } = useLanguage();
+
+  const [hours, minutes] = time.split(":").map(Number);
+
+  if (Number.isNaN(hours) || Number.isNaN(minutes)) {
+    return <span>{time}</span>;
+  }
+
+  return (
+    <span dir={language === "ar" ? "rtl" : "ltr"}>
+      {new Intl.DateTimeFormat(
+        language === "ar" ? "ar-LB" : "en-US",
+        {
+          hour: "numeric",
+          minute: "2-digit",
+          hour12: true,
+        }
+      ).format(new Date(2000, 0, 1, hours, minutes))}
+    </span>
+  );
+}
+
+
+export function DashboardDate({
+  date,
+  kind,
+}: {
+  date: string;
+  kind: "day" | "month-day";
+}) {
+  const { language } = useLanguage();
+
+  const parsedDate = new Date(`${date}T12:00:00Z`);
+
+  const options: Intl.DateTimeFormatOptions =
+    kind === "day"
+      ? { weekday: "short", timeZone: "UTC" }
+      : { month: "short", day: "numeric", timeZone: "UTC" };
+
+  return (
+    <span dir={language === "ar" ? "rtl" : "ltr"}>
+      {new Intl.DateTimeFormat(
+        language === "ar" ? "ar-LB" : "en-US",
+        options
+      ).format(parsedDate)}
+    </span>
+  );
+}
+export function DashboardDoctorName({
+  name,
+  nameAr,
+}: {
+  name: string;
+  nameAr?: string;
+}) {
+  const { language } = useLanguage();
+
+  const displayName =
+    language === "ar" ? nameAr?.trim() || name : name;
+
+  return (
+    <span dir={language === "ar" ? "rtl" : "ltr"}>
+      {displayName}
+    </span>
+  );
+}
+export function DashboardSpecialty({
+  specialty,
+}: {
+  specialty: string;
+}) {
+  const { language } = useLanguage();
+
+  return (
+    <span dir={language === "ar" ? "rtl" : "ltr"}>
+      {t(language, specialty)}
+    </span>
+  );
+}

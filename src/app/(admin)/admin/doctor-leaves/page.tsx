@@ -3,10 +3,12 @@ import connectDB from "@/lib/mongodb"
 import { requireRole } from "@/lib/session"
 import DoctorLeave from "@/models/DoctorLeave"
 import Appointment from "@/models/Appointment"
+import Specialty from "@/models/Specialty"
 import {
     DoctorLeavesManager,
     type DoctorLeaveRow,
 } from "./doctor-leaves-manager"
+import DoctorLeavesHeading from "./doctor-leaves-heading"
 
 export const dynamic = "force-dynamic"
 
@@ -15,7 +17,7 @@ export default async function DoctorLeavesPage() {
     await connectDB()
 
     const leaveDocs = await DoctorLeave.find()
-        .populate("doctor", "name specialty")
+        .populate("doctor", "name nameAr specialty")
         .sort({ startDate: -1 })
         .lean()
 
@@ -34,6 +36,7 @@ export default async function DoctorLeavesPage() {
             const doctor = leave.doctor as unknown as {
                 _id: import("mongoose").Types.ObjectId
                 name: string
+                nameAr?: string
                 specialty: string
             } | null
 
@@ -48,39 +51,68 @@ export default async function DoctorLeavesPage() {
             const appointments = doctor
                 ? await Appointment.find({
                       doctor: doctor._id,
-                      date: { $gte: start, $lt: exclusiveEnd },
+                      date: {
+                          $gte: start,
+                          $lt: exclusiveEnd,
+                      },
                       leaveConflict: true,
-                      status: { $in: ["pending", "confirmed"] },
+                      status: {
+                          $in: ["pending", "confirmed"],
+                      },
                   })
                       .populate("patient", "name email")
                       .sort({ date: 1, time: 1 })
                       .lean()
                 : []
 
-            const affectedAppointments = appointments.map((appointment) => {
-                const patient = appointment.patient as unknown as {
-                    _id: import("mongoose").Types.ObjectId
-                    name?: string
-                    email?: string
-                } | null
+            const affectedAppointments = appointments.map(
+                (appointment) => {
+                    const patient = appointment.patient as unknown as {
+                        _id: import("mongoose").Types.ObjectId
+                        name?: string
+                        email?: string
+                    } | null
 
-                return {
-                    id: String(appointment._id),
-                    patientName: patient?.name ?? "Unknown patient",
-                    patientEmail: patient?.email ?? "",
-                    date: new Date(appointment.date)
-                        .toISOString()
-                        .slice(0, 10),
-                    time: appointment.time,
-                    status: appointment.status,
-                    type: appointment.type,
+                    return {
+                        id: String(appointment._id),
+                        patientName:
+                            patient?.name ?? "Unknown patient",
+                        patientEmail: patient?.email ?? "",
+                        date: new Date(appointment.date)
+                            .toISOString()
+                            .slice(0, 10),
+                        time: appointment.time,
+                        status: appointment.status,
+                        type: appointment.type,
+                    }
                 }
-            })
+            )
+
+            // Find the Arabic specialty name using the English name
+            // stored in the Doctor document.
+            const specialtyName = doctor?.specialty ?? "—"
+
+            const specialtyDoc =
+                specialtyName !== "—"
+                    ? await Specialty.findOne({
+                          name: specialtyName,
+                      })
+                          .select("name nameAr")
+                          .lean()
+                    : null
+
+            const specialtyNameAr =
+                specialtyDoc?.nameAr?.trim() || specialtyName
 
             return {
                 id: String(leave._id),
                 doctorName: doctor?.name ?? "Deleted doctor",
-                specialty: doctor?.specialty ?? "—",
+                doctorNameAr:
+                    doctor?.nameAr?.trim() ||
+                    doctor?.name ||
+                    "—",
+                specialty: specialtyName,
+                specialtyAr: specialtyNameAr,
                 startDate: start.toISOString().slice(0, 10),
                 endDate: end.toISOString().slice(0, 10),
                 reason: leave.reason ?? "",
@@ -93,14 +125,7 @@ export default async function DoctorLeavesPage() {
 
     return (
         <div className="space-y-6">
-            <div>
-                <h1 className="text-3xl font-bold tracking-tight">
-                    Doctor Leaves
-                </h1>
-                <p className="mt-1 text-muted-foreground">
-                    View and manage scheduled doctor leave.
-                </p>
-            </div>
+            <DoctorLeavesHeading />
 
             <DoctorLeavesManager leaves={leaves} />
         </div>

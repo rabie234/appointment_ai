@@ -64,6 +64,7 @@ export type SpecialtyRow = {
     name: string
     nameAr: string
     description: string
+    descriptionAr: string
 }
 
 function SubmitButton({ children }: { children: React.ReactNode }) {
@@ -486,7 +487,7 @@ function SpecialtiesDialog({
                     <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
     <Input
         name="name"
-        placeholder={t(language, "Specialty name")}
+        placeholder="Specialty name (English)"
         required
     />
 
@@ -496,13 +497,18 @@ function SpecialtiesDialog({
         dir="rtl"
     />
 
-    <Input
-        name="description"
-        placeholder={t(
-            language,
-            "Short description (optional)"
-        )}
-    />
+    
+<Input
+  name="description"
+  placeholder="Short description (English, optional)"
+/>
+
+<Input
+  name="descriptionAr"
+  placeholder="وصف التخصص بالعربية (اختياري)"
+  dir="rtl"
+/>
+
 
     <SubmitButton>
         <Plus className="h-4 w-4" />
@@ -537,11 +543,15 @@ function SpecialtiesDialog({
         ? specialty.nameAr
         : specialty.name}
 </p>
-                                    {specialty.description && (
-                                        <p className="truncate text-xs text-muted-foreground">
-                                            {specialty.description}
-                                        </p>
-                                    )}
+                                   {(language === "ar"
+  ? specialty.descriptionAr || specialty.description
+  : specialty.description) && (
+  <p className="truncate text-xs text-muted-foreground">
+    {language === "ar"
+      ? specialty.descriptionAr || specialty.description
+      : specialty.description}
+  </p>
+)}
                                 </div>
 
                                 <DeleteButton

@@ -1,6 +1,8 @@
 
 "use client"
 
+import { useLanguage } from "@/components/i18n/language-provider"
+import { t } from "@/components/i18n/translations"
 import { useMemo, useState } from "react"
 import { useRouter } from "next/navigation"
 import { Input } from "@/components/ui/input"
@@ -18,8 +20,6 @@ import {
     Trash2,
 } from "lucide-react"
 import { cancelDoctorLeave } from "../doctors/leave-actions"
-import Doctor from "@/models/Doctor"
-import DoctorLeave from "@/models/DoctorLeave"
 
 export type AffectedAppointmentRow = {
     id: string
@@ -34,7 +34,9 @@ export type AffectedAppointmentRow = {
 export type DoctorLeaveRow = {
     id: string
     doctorName: string
+    doctorNameAr: string
     specialty: string
+    specialtyAr: string
     startDate: string
     endDate: string
     reason: string
@@ -48,6 +50,9 @@ export function DoctorLeavesManager({
 }: {
     leaves: DoctorLeaveRow[]
 }) {
+    const { language } = useLanguage()
+    const isArabic = language === "ar"
+
     const [search, setSearch] = useState("")
     const [statusFilter, setStatusFilter] = useState("All")
     const [selectedLeave, setSelectedLeave] =
@@ -78,7 +83,10 @@ export function DoctorLeavesManager({
     async function handleCancelLeave(leaveId: string) {
         if (
             !window.confirm(
-                "Are you sure you want to cancel this doctor leave?"
+                t(
+                    language,
+                    "Are you sure you want to cancel this doctor leave?"
+                )
             )
         ) {
             return
@@ -97,26 +105,45 @@ export function DoctorLeavesManager({
             setSelectedLeave(null)
             router.refresh()
         } catch {
-            window.alert("Could not cancel leave. Please try again.")
+            window.alert(
+                t(
+                    language,
+                    "Could not cancel leave. Please try again."
+                )
+            )
         } finally {
             setCancellingId(null)
         }
     }
 
     return (
-        <div className="space-y-6">
+        <div
+            className="space-y-6"
+            dir={isArabic ? "rtl" : "ltr"}
+        >
             {/* Search and status filter */}
             <div className="flex flex-col gap-4 md:flex-row">
                 <div className="relative flex-1">
-                    <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                    <Search
+                        className={`absolute ${
+                            isArabic ? "right-3" : "left-3"
+                        } top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground`}
+                    />
 
                     <Input
                         value={search}
                         onChange={(event) =>
                             setSearch(event.target.value)
                         }
-                        placeholder="Search doctor, specialty, or reason..."
-                        className="h-11 pl-10"
+                        placeholder={t(
+                            language,
+                            "Search doctor, specialty, or reason..."
+                        )}
+                        className={`h-11 ${
+                            isArabic
+                                ? "pr-10 text-right"
+                                : "pl-10"
+                        }`}
                     />
                 </div>
 
@@ -126,54 +153,87 @@ export function DoctorLeavesManager({
                         setStatusFilter(event.target.value)
                     }
                     className="h-11 rounded-md border border-input bg-background px-3 text-sm"
-                    aria-label="Filter leaves by status"
+                    aria-label={t(
+                        language,
+                        "Filter leaves by status"
+                    )}
                 >
-                    <option value="All">All leave records</option>
-                    <option value="Upcoming">Upcoming</option>
-                    <option value="Ongoing">Ongoing</option>
-                    <option value="Past">Past</option>
+                    <option value="All">
+                        {t(language, "All leave records")}
+                    </option>
+                    <option value="Upcoming">
+                        {t(language, "Upcoming")}
+                    </option>
+                    <option value="Ongoing">
+                        {t(language, "Ongoing")}
+                    </option>
+                    <option value="Past">
+                        {t(language, "Past")}
+                    </option>
                 </select>
             </div>
 
             {/* Leave statistics */}
             <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
-                {(["Upcoming", "Ongoing", "Past"] as const).map(
-                    (status) => (
-                        <div
-                            key={status}
-                            className="rounded-xl border bg-card p-4"
-                        >
-                            <p className="text-sm text-muted-foreground">
-                                {status} leaves
-                            </p>
+                {(
+                    ["Upcoming", "Ongoing", "Past"] as const
+                ).map((status) => (
+                    <div
+                        key={status}
+                        className="rounded-xl border bg-card p-4"
+                    >
+                        <p className="text-sm text-muted-foreground">
+                            {t(language, status)}{" "}
+                            {t(language, "leaves")}
+                        </p>
 
-                            <p className="mt-1 text-2xl font-bold">
-                                {
-                                    leaves.filter(
-                                        (leave) => leave.status === status
-                                    ).length
-                                }
-                            </p>
-                        </div>
-                    )
-                )}
+                        <p className="mt-1 text-2xl font-bold">
+                            {
+                                leaves.filter(
+                                    (leave) =>
+                                        leave.status === status
+                                ).length
+                            }
+                        </p>
+                    </div>
+                ))}
             </div>
 
             {/* Doctor leaves table */}
             <div className="overflow-x-auto rounded-xl border bg-card">
                 <table className="w-full text-sm">
                     <thead className="bg-muted/50">
-                        <tr className="text-left">
-                            <th className="p-4">Doctor</th>
-                            <th className="p-4">Specialty</th>
-                            <th className="p-4">Start Date</th>
-                            <th className="p-4">End Date</th>
-                            <th className="p-4">Reason</th>
-                            <th className="p-4">Status</th>
+                        <tr
+                            className={
+                                isArabic
+                                    ? "text-right"
+                                    : "text-left"
+                            }
+                        >
                             <th className="p-4">
-                                Affected Appointments
+                                {t(language, "Doctor")}
                             </th>
-                            <th className="p-4">Actions</th>
+                            <th className="p-4">
+                                {t(language, "Specialty")}
+                            </th>
+                            <th className="p-4">
+                                {t(language, "Start Date")}
+                            </th>
+                            <th className="p-4">
+                                {t(language, "End Date")}
+                            </th>
+                            <th className="p-4">
+                                {t(language, "Reason")}
+                            </th>
+                            <th className="p-4">
+                                {t(language, "Status")}
+                            </th>
+                            <th className="p-4">
+                                {t(language, "Affected Appointments")}
+                            </th>
+                            <th className="p-4">
+                                {t(language, "Actions")}
+                            </th>
                         </tr>
                     </thead>
 
@@ -185,7 +245,10 @@ export function DoctorLeavesManager({
                                     className="p-8 text-center text-muted-foreground"
                                 >
                                     <CalendarDays className="mx-auto mb-2 h-6 w-6" />
-                                    No matching leave records found.
+                                    {t(
+                                        language,
+                                        "No matching leave records found."
+                                    )}
                                 </td>
                             </tr>
                         ) : (
@@ -195,11 +258,15 @@ export function DoctorLeavesManager({
                                     className="border-t"
                                 >
                                     <td className="p-4 font-medium">
-                                        {leave.doctorName}
+                                       {isArabic
+        ? leave.doctorNameAr || leave.doctorName
+        : leave.doctorName}
                                     </td>
 
                                     <td className="p-4">
-                                        {leave.specialty}
+                                        {isArabic
+        ? leave.specialtyAr 
+        : leave.specialty}
                                     </td>
 
                                     <td className="p-4">
@@ -216,20 +283,25 @@ export function DoctorLeavesManager({
 
                                     <td className="p-4">
                                         <span className="rounded-full bg-muted px-3 py-1 text-xs font-medium">
-                                            {leave.status}
+                                            {t(language, leave.status)}
                                         </span>
                                     </td>
 
-                                    {/* Clickable affected appointment count */}
                                     <td className="p-4">
                                         {leave.affectedCount > 0 ? (
                                             <button
                                                 type="button"
                                                 onClick={() =>
-                                                    setSelectedLeave(leave)
+                                                    setSelectedLeave(
+                                                        leave
+                                                    )
                                                 }
                                                 className="font-semibold text-red-600 underline underline-offset-4 hover:text-red-700"
-                                                aria-label={`View ${leave.affectedCount} affected appointments for ${leave.doctorName}`}
+                                                aria-label={
+                                                    isArabic
+                                                        ? `عرض ${leave.affectedCount} من المواعيد المتأثرة للطبيب ${leave.doctorName}`
+                                                        : `View ${leave.affectedCount} affected appointments for ${leave.doctorName}`
+                                                }
                                             >
                                                 {leave.affectedCount}
                                             </button>
@@ -240,24 +312,34 @@ export function DoctorLeavesManager({
                                         )}
                                     </td>
 
-                                    {/* Cancel leave */}
                                     <td className="p-4">
                                         {leave.status !== "Past" && (
                                             <Button
                                                 variant="outline"
                                                 size="sm"
                                                 disabled={
-                                                    cancellingId === leave.id
+                                                    cancellingId ===
+                                                    leave.id
                                                 }
                                                 onClick={() =>
-                                                    handleCancelLeave(leave.id)
+                                                    handleCancelLeave(
+                                                        leave.id
+                                                    )
                                                 }
                                                 className="gap-2 text-red-600 hover:text-red-700"
                                             >
                                                 <Trash2 className="h-4 w-4" />
-                                                {cancellingId === leave.id
-                                                    ? "Cancelling..."
-                                                    : "Cancel"}
+
+                                                {cancellingId ===
+                                                leave.id
+                                                    ? t(
+                                                          language,
+                                                          "Cancelling..."
+                                                      )
+                                                    : t(
+                                                          language,
+                                                          "Cancel"
+                                                      )}
                                             </Button>
                                         )}
                                     </td>
@@ -272,19 +354,27 @@ export function DoctorLeavesManager({
             <Dialog
                 open={selectedLeave !== null}
                 onOpenChange={(open) => {
-                    if (!open) setSelectedLeave(null)
+                    if (!open) {
+                        setSelectedLeave(null)
+                    }
                 }}
             >
-                <DialogContent className="max-w-4xl">
+                <DialogContent
+                    className="max-w-4xl"
+                    dir={isArabic ? "rtl" : "ltr"}
+                >
                     <DialogHeader>
                         <DialogTitle>
-                            Affected Appointments
+                            {t(
+                                language,
+                                "Affected Appointments"
+                            )}
                         </DialogTitle>
 
                         <DialogDescription>
-                            {selectedLeave
-                                ? `${selectedLeave.doctorName} — ${selectedLeave.startDate} to ${selectedLeave.endDate}`
-                                : "Appointments affected by doctor leave."}
+                           {selectedLeave
+    ? `${isArabic ? selectedLeave.doctorNameAr : selectedLeave.doctorName} — ${selectedLeave.startDate} ${t(language, "to")} ${selectedLeave.endDate}`
+    : t(language, "Appointments affected by doctor leave.")}
                         </DialogDescription>
                     </DialogHeader>
 
@@ -292,13 +382,31 @@ export function DoctorLeavesManager({
                         <div className="max-h-[60vh] overflow-auto rounded-md border">
                             <table className="w-full text-sm">
                                 <thead className="sticky top-0 bg-muted">
-                                    <tr className="text-left">
-                                        <th className="p-3">Patient</th>
-                                        <th className="p-3">Email</th>
-                                        <th className="p-3">Date</th>
-                                        <th className="p-3">Time</th>
-                                        <th className="p-3">Type</th>
-                                        <th className="p-3">Status</th>
+                                    <tr
+                                        className={
+                                            isArabic
+                                                ? "text-right"
+                                                : "text-left"
+                                        }
+                                    >
+                                        <th className="p-3">
+                                            {t(language, "Patient")}
+                                        </th>
+                                        <th className="p-3">
+                                            {t(language, "Email")}
+                                        </th>
+                                        <th className="p-3">
+                                            {t(language, "Date")}
+                                        </th>
+                                        <th className="p-3">
+                                            {t(language, "Time")}
+                                        </th>
+                                        <th className="p-3">
+                                            {t(language, "Type")}
+                                        </th>
+                                        <th className="p-3">
+                                            {t(language, "Status")}
+                                        </th>
                                     </tr>
                                 </thead>
 
@@ -310,7 +418,10 @@ export function DoctorLeavesManager({
                                                 colSpan={6}
                                                 className="p-6 text-center text-muted-foreground"
                                             >
-                                                No affected appointments found.
+                                                {t(
+                                                    language,
+                                                    "No affected appointments found."
+                                                )}
                                             </td>
                                         </tr>
                                     ) : (
@@ -338,11 +449,17 @@ export function DoctorLeavesManager({
                                                     </td>
 
                                                     <td className="p-3">
-                                                        {appointment.type}
+                                                        {t(
+                                                            language,
+                                                            appointment.type
+                                                        )}
                                                     </td>
 
                                                     <td className="p-3">
-                                                        {appointment.status}
+                                                        {t(
+                                                            language,
+                                                            appointment.status
+                                                        )}
                                                     </td>
                                                 </tr>
                                             )

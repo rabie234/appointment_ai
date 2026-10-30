@@ -41,9 +41,7 @@ export default auth((req) => {
 });
 
 export const config = {
-  // Skip Next internals, static assets, and /api/auth/* (NextAuth's own
-  // endpoints must stay reachable while signed out or login can't work).
   matcher: [
-    '/((?!api/auth|_next/static|_next/image|favicon.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp)$).*)',
+    '/((?!api/|_next/static|_next/image|favicon.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp)$).*)',
   ],
 };

@@ -37,6 +37,7 @@ type Status = IAppointment["status"]
 type PopulatedDoctor = {
     _id: unknown
     name?: string
+    nameAr?: string
     specialty?: string
     rating?: number
 } | null
@@ -345,7 +346,7 @@ export default async function AdminReportsPage({
             .select("date time status type price doctor")
             .populate<{ doctor: PopulatedDoctor }>(
                 "doctor",
-                "name specialty rating"
+                "name nameAr specialty rating"
             )
             .lean(),
 
@@ -521,6 +522,7 @@ export default async function AdminReportsPage({
             string,
             {
                 name: string
+                nameAr: string
                 specialty: string
                 rating: number
                 booked: number
@@ -537,6 +539,7 @@ export default async function AdminReportsPage({
 
             const entry = map.get(id) ?? {
                 name: appointment.doctor.name ?? "Unknown doctor",
+                nameAr: appointment.doctor.nameAr ?? "",
                 specialty: appointment.doctor.specialty ?? "",
                 rating: appointment.doctor.rating ?? 0,
                 booked: 0,
@@ -798,7 +801,7 @@ export default async function AdminReportsPage({
                                         >
                                             <div className="flex items-center justify-between gap-2 text-sm">
                                                 <span className="truncate">
-                                                    {name}
+                                                    {t(language, name)}
                                                 </span>
 
                                                 <span className="text-xs font-bold tabular-nums">
@@ -878,11 +881,13 @@ export default async function AdminReportsPage({
                                     </div>
 
                                     <h4 className="font-bold text-lg mb-1">
-                                        {doctor.name}
+                                         {language === "ar" && doctor.nameAr?.trim()
+        ? doctor.nameAr
+        : doctor.name}
                                     </h4>
 
                                     <p className="text-primary text-xs font-bold uppercase tracking-tight mb-4">
-                                        {doctor.specialty}
+                                        {t(language, doctor.specialty)}
                                     </p>
 
                                     <div className="flex items-center justify-between text-sm">

@@ -5,6 +5,8 @@ import {
     Calendar,
     UserPlus,
     Activity,
+    Clock3,
+    AlertTriangle,
     ArrowUpRight,
     ArrowDownRight,
     ArrowRight,
@@ -29,9 +31,15 @@ import Appointment, { type IAppointment } from "@/models/Appointment"
 import Doctor from "@/models/Doctor"
 import User from "@/models/User"
 import {
-    DashboardText,
-    DashboardStatNote,
-} from "./dashboard-translations"
+  DashboardText,
+  DashboardStatNote,
+  DashboardTime,
+  DashboardDate,
+  DashboardDoctorName,
+  DashboardSpecialty,
+} from "./dashboard-translations";
+
+
 // Every number here is live; never serve a cached snapshot.
 export const dynamic = "force-dynamic"
 
@@ -71,12 +79,15 @@ function badgeVariant(status: Status) {
     }
 }
 
+
 function to12h(time: string): string {
-    const [h, m] = time.split(":").map(Number)
-    if (Number.isNaN(h)) return time
-    const period = h >= 12 ? "PM" : "AM"
-    const hour12 = h % 12 === 0 ? 12 : h % 12
-    return `${hour12}:${String(m).padStart(2, "0")} ${period}`
+    const [h, m] = time.split(":").map(Number);
+    if (Number.isNaN(h)) return time;
+
+    const period = h >= 12 ? "PM" : "AM";
+    const hour12 = h % 12 === 0 ? 12 : h % 12;
+
+    return `${hour12}:${String(m).padStart(2, "0")} ${period}`;
 }
 
 // Appointment dates are stored as UTC midnight, so format them in UTC.
@@ -112,20 +123,23 @@ type UpcomingRow = {
     patient: string
     doctor: string
     specialty: string
-    when: string
+    day: "Today" | "Tomorrow"
+    time: string
     status: Status
 }
 
 type CapacityDay = {
-    key: string
-    label: string
-    date: string
-    booked: number
-    slots: number
-    isToday: boolean
+  key: string
+  booked: number
+  slots: number
+  isToday: boolean
 }
 
-type PopulatedName = { name?: string; specialty?: string } | null
+type PopulatedName = {
+  name?: string;
+  nameAr?: string;
+  specialty?: string;
+} | null
 
 export default async function AdminDashboardPage() {
     const session = await requireRole("admin")
@@ -149,6 +163,8 @@ export default async function AdminDashboardPage() {
         activeDoctors,
         inactiveDoctors,
         totalAppointments,
+        pendingAppointments,
+        missedAppointments,
         bookedRecently,
         bookedPreviously,
         todayDocs,
@@ -162,6 +178,8 @@ export default async function AdminDashboardPage() {
         Doctor.find({ status: "active" }).select("schedule availability").lean(),
         Doctor.countDocuments({ status: "inactive" }),
         Appointment.countDocuments(notCancelled),
+        Appointment.countDocuments({ status: "pending" }),
+        Appointment.countDocuments({ status: "missed" }),
         // Same population as the total (cancelled excluded), so the delta and value agree.
         Appointment.countDocuments({ createdAt: { $gte: compareStart }, ...notCancelled }),
         Appointment.countDocuments({ createdAt: { $gte: comparePrevStart, $lt: compareStart }, ...notCancelled }),
@@ -174,7 +192,10 @@ export default async function AdminDashboardPage() {
             status: { $in: ["pending", "confirmed", "in-progress"] },
         })
             .populate<{ patient: PopulatedName }>("patient", "name")
-            .populate<{ doctor: PopulatedName }>("doctor", "name specialty")
+            .populate<{ doctor: PopulatedName }>(
+  "doctor",
+  "name nameAr specialty"
+)
             .sort({ date: 1, time: 1 })
             .limit(UPCOMING_LIMIT)
             .lean(),
@@ -234,20 +255,28 @@ export default async function AdminDashboardPage() {
     // ── Upcoming appointments (today + tomorrow) ────────────────────────────
 
     const upcoming: UpcomingRow[] = upcomingDocs.map((a) => {
-        const day = new Date(a.date).getTime() === today.getTime() ? "Today" : "Tomorrow"
-        return {
-            id: String(a._id),
-            patient: a.patient?.name ?? "Unknown patient",
-            doctor: a.doctor?.name ?? "Unknown doctor",
-            specialty: a.doctor?.specialty ?? "",
-            when: `${day}, ${to12h(a.time)}`,
-            status: a.status,
-        }
-    })
+  const day: "Today" | "Tomorrow" =
+    new Date(a.date).getTime() === today.getTime()
+      ? "Today"
+      : "Tomorrow";
 
+  return {
+    id: String(a._id),
+    patient: a.patient?.name ?? "Unknown patient",
+    doctor: a.doctor?.name ?? "Unknown doctor",
+    specialty: a.doctor?.specialty ?? "",
+    day,
+    time: a.time,
+    status: a.status,
+  };
+});
     // ── This week's capacity: booked slots vs slots doctors' schedules allow ─
 
-    const schedules = activeDoctors.map((d) => normalizeWeek(d.schedule))
+    const schedules = activeDoctors
+    .filter((doctor) => doctor.availability === "available")
+    .map((doctor) => normalizeWeek(doctor.schedule))
+
+201
     const bookedByDay = new Map(weekCounts.map((w) => [new Date(w._id).toISOString().slice(0, 10), w.count]))
 
     const week: CapacityDay[] = Array.from({ length: 7 }, (_, i) => {
@@ -338,6 +367,80 @@ export default async function AdminDashboardPage() {
                 ))}
             </div>
 
+            {/* Needs Attention */}
+            <section className="space-y-4" aria-labelledby="needs-attention-heading">
+                <div>
+                    <h2 id="needs-attention-heading" className="text-xl font-bold">
+                        <DashboardText text="Needs Attention" />
+                    </h2>
+                    <p className="mt-1 text-sm text-muted-foreground">
+                        <DashboardText text="Appointments that may need an administrator's follow-up." />
+                    </p>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    {/* Pending Appointments */}
+                    <Card className="border-amber-200/70 dark:border-amber-900/60 bg-card/60 shadow-sm">
+                        <CardContent className="flex items-center justify-between gap-4 p-5">
+                            <div className="flex items-center gap-3">
+                                <div className="rounded-xl bg-amber-100 p-3 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300">
+                                    <Clock3 className="h-5 w-5" />
+                                </div>
+                                <div>
+                                    <p className="font-semibold">
+                                        <DashboardText text="Pending Appointments" />
+                                    </p>
+                                    <p className="mt-1 text-sm text-muted-foreground">
+                                        <DashboardText text="Awaiting confirmation" />
+                                    </p>
+                                </div>
+                            </div>
+                            <div className="text-2xl font-bold tabular-nums">
+                                {pendingAppointments.toLocaleString()}
+                            </div>
+                            <Link
+                                href="/admin/appointments?status=pending"
+                                aria-label="Review pending appointments"
+                            >
+                                <Button variant="outline" size="sm">
+                                    <DashboardText text="Review" />
+                                </Button>
+                            </Link>
+                        </CardContent>
+                    </Card>
+
+                    {/* Missed Appointments */}
+                    <Card className="border-red-200/70 dark:border-red-900/60 bg-card/60 shadow-sm">
+                        <CardContent className="flex items-center justify-between gap-4 p-5">
+                            <div className="flex items-center gap-3">
+                                <div className="rounded-xl bg-red-100 p-3 text-red-700 dark:bg-red-900/30 dark:text-red-300">
+                                    <AlertTriangle className="h-5 w-5" />
+                                </div>
+                                <div>
+                                    <p className="font-semibold">
+                                        <DashboardText text="Missed Appointments" />
+                                    </p>
+                                    <p className="mt-1 text-sm text-muted-foreground">
+                                        <DashboardText text="May need follow-up" />
+                                    </p>
+                                </div>
+                            </div>
+                            <div className="text-2xl font-bold tabular-nums">
+                                {missedAppointments.toLocaleString()}
+                            </div>
+                            <Link
+                                href="/admin/appointments?status=missed"
+                                aria-label="Review missed appointments"
+                            >
+                                <Button variant="outline" size="sm">
+                                    <DashboardText text="Review" />
+                                </Button>
+                            </Link>
+                        </CardContent>
+                    </Card>
+                </div>
+            </section>
+
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
                 {/* Upcoming Appointments Table */}
                 <Card className="lg:col-span-2 border-none shadow-sm bg-card/60">
@@ -351,7 +454,9 @@ export default async function AdminDashboardPage() {
                             </p>
                         </div>
                         <Link href="/admin/appointments">
-                            <Button variant="ghost" size="sm" className="text-primary font-bold"><DashboardText text="View All" /></Button>
+                            <Button variant="ghost" size="sm" className="text-primary font-bold">
+                                <DashboardText text="View All" />
+                            </Button>
                         </Link>
                     </CardHeader>
                     <CardContent className="p-0">
@@ -377,12 +482,24 @@ export default async function AdminDashboardPage() {
                                         <TableRow key={app.id} className="group hover:bg-accent/50 transition-colors border-muted/30">
                                             <TableCell className="pl-6 font-medium">{app.patient}</TableCell>
                                             <TableCell>
-                                                <span className="text-muted-foreground font-medium block">{app.doctor}</span>
+                                                <span className="text-muted-foreground font-medium block">
+  <DashboardDoctorName
+    name={app.doctor}
+    nameAr={upcomingDocs.find(
+      (a) => String(a._id) === app.id
+    )?.doctor?.nameAr}
+  />
+</span>
                                                 {app.specialty && (
-                                                    <span className="text-xs text-muted-foreground/80">{app.specialty}</span>
+                                                    <span className="text-xs text-muted-foreground/80">
+  <DashboardSpecialty specialty={app.specialty} />
+</span>
                                                 )}
                                             </TableCell>
-                                            <TableCell className="text-xs font-semibold">{app.when}</TableCell>
+                                           <TableCell className="text-xs font-semibold">
+  <DashboardText text={app.day} />,{" "}
+  <DashboardTime time={app.time} />
+</TableCell>
                                             <TableCell>
                                                 <Badge variant={badgeVariant(app.status)}><DashboardText text={STATUS_LABEL[app.status]} /></Badge>
                                             </TableCell>
@@ -435,21 +552,35 @@ export default async function AdminDashboardPage() {
 }
 
 /** Change vs a named period. Up is good for every metric that uses this. */
+/** Change vs a named period. */
 function DeltaLine({ delta }: { delta: Delta }) {
-    const Icon = delta.direction === "up" ? ArrowUpRight : delta.direction === "down" ? ArrowDownRight : Minus
+    const Icon =
+        delta.direction === "up"
+            ? ArrowUpRight
+            : delta.direction === "down"
+              ? ArrowDownRight
+              : Minus;
+
     const tone =
         delta.direction === "up"
-            ? "text-emerald-600"
+            ? "text-emesrald-600"
             : delta.direction === "down"
-                ? "text-destructive"
-                : "text-muted-foreground"
+              ? "text-destructive"
+              : "text-muted-foreground";
+
     return (
         <div className="flex items-center mt-1">
             <Icon className={cn("h-4 w-4 mr-1", tone)} />
-            <span className={cn("font-medium text-xs", tone)}>{delta.text}</span>
-            <span className="text-[10px] text-muted-foreground ml-1">{delta.period}</span>
+
+            <span className={cn("font-medium text-xs", tone)}>
+                <DashboardText text={delta.text} />
+            </span>
+
+            <span className="text-[10px] text-muted-foreground ml-1">
+                <DashboardText text={delta.period} />
+            </span>
         </div>
-    )
+    );
 }
 
 /** One day's booked share of bookable slots; amber once it is nearly full. */
@@ -459,20 +590,17 @@ function CapacityMeter({ day }: { day: CapacityDay }) {
     const pct = Math.round(share * 100)
     const nearlyFull = !closed && share >= NEARLY_FULL
     const summary = closed
-        ? `${day.label}, ${day.date}: no working hours`
-        : `${day.label}, ${day.date}: ${day.booked} of ${day.slots} slots booked (${pct}%)`
+    ? `${day.key}: no working hours`
+    : `${day.key}: ${day.booked} of ${day.slots} slots booked (${pct}%)`
 
     return (
         <div className="space-y-2" title={summary}>
             <div className="flex justify-between items-center text-xs">
                 <span className="font-bold uppercase tracking-wider flex items-center gap-2">
-                    {day.label}
-                    <span className="font-normal normal-case tracking-normal text-muted-foreground">{day.date}</span>
-                    {day.isToday && (
-                        <span className="rounded-full bg-primary/10 px-1.5 py-0.5 text-[10px] font-semibold normal-case tracking-normal text-primary">
-                            <DashboardText text="Today" />
-                        </span>
-                    )}
+                    <DashboardDate date={day.key} kind="day" />
+<span className="font-normal normal-case tracking-normal text-muted-foreground">
+    <DashboardDate date={day.key} kind="month-day" />
+</span>
                 </span>
                 <span className="text-muted-foreground">
                     {closed ? (

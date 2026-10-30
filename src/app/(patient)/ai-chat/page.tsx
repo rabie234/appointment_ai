@@ -606,19 +606,6 @@ function Bubble({
           </span>
         ) : null}
 
-        {!!message.sources?.length && (
-          <div className="mt-3 border-t pt-2 text-xs text-muted-foreground">
-            <p className="font-medium">{t(language, "Clinic sources")}</p>
-            <ul className="mt-1 space-y-1">
-              {message.sources.map((source) => (
-                <li key={source.id}>
-                  {source.title} · {t(language, "revision")} {source.revision}
-                </li>
-              ))}
-            </ul>
-          </div>
-        )}
-
         {message.confirmation ? (
           <BookedCard c={message.confirmation} language={language} />
         ) : message.suggestion ? (
