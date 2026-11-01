@@ -1,7 +1,7 @@
+
 "use client"
 
 import { useState, useEffect, useRef } from "react"
-
 import type { Session } from "next-auth"
 import { useRouter } from "next/navigation"
 import { Input } from "@/components/ui/input"
@@ -9,18 +9,29 @@ import { useLanguage } from "@/components/i18n/language-provider"
 import { t } from "@/components/i18n/translations"
 import { LanguageSwitcher } from "@/components/i18n/language-switcher"
 import { LogoutButton } from "./logout-button"
-import { Search, ChevronDown, Languages, Menu } from "lucide-react"
+import {
+    Search,
+    ChevronDown,
+    Languages,
+    Menu,
+    UserRound,
+    Stethoscope,
+    CalendarDays,
+} from "lucide-react"
+
 type SearchResult = {
     id: string
     type: "patient" | "doctor" | "appointment"
     title: string
     subtitle: string | null
+    status?: string
+    date?: string
+    time?: string
     href: string
 }
 
 export function AdminTopbar({
     user,
-    onMenuClick,
 }: {
     user: Session["user"]
     onMenuClick?: () => void
@@ -35,6 +46,23 @@ export function AdminTopbar({
     const [isSearching, setIsSearching] = useState(false)
 
     const dropdownRef = useRef<HTMLDivElement>(null)
+
+    // Translate the search result type based on the selected language.
+    const getResultTypeLabel = (type: SearchResult["type"]) => {
+        if (isArabic) {
+            return {
+                patient: "مريض",
+                doctor: "طبيب",
+                appointment: "موعد",
+            }[type]
+        }
+
+        return {
+            patient: "Patient",
+            doctor: "Doctor",
+            appointment: "Appointment",
+        }[type]
+    }
 
     // Search patients, doctors, and appointments.
     useEffect(() => {
@@ -113,15 +141,22 @@ export function AdminTopbar({
             dir={isArabic ? "rtl" : "ltr"}
             className="sticky top-0 z-30 flex h-16 items-center border-b bg-background/95 px-4 backdrop-blur md:px-6"
         >
+            {/* Mobile sidebar button */}
             <button
-    type="button"
-    onClick={() => window.dispatchEvent(new Event("admin-menu-open"))}
-    aria-label={isArabic ? "فتح القائمة الجانبية" : "Open sidebar"}
-    className="lg:hidden inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-lg hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
->
-    <Menu className="h-6 w-6" />
-</button>
+                type="button"
+                onClick={() =>
+                    window.dispatchEvent(new Event("admin-menu-open"))
+                }
+                aria-label={
+                    isArabic ? "فتح القائمة الجانبية" : "Open sidebar"
+                }
+                className="lg:hidden inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-lg hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+            >
+                <Menu className="h-6 w-6" />
+            </button>
+
             <div className="flex flex-1 items-center gap-4">
+                {/* Global search */}
                 <div className="relative hidden w-full max-w-md md:block">
                     <Search
                         className={`absolute top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground ${
@@ -131,7 +166,9 @@ export function AdminTopbar({
 
                     <Input
                         value={searchQuery}
-                        onChange={(event) => setSearchQuery(event.target.value)}
+                        onChange={(event) =>
+                            setSearchQuery(event.target.value)
+                        }
                         placeholder={t(language, "Search records...")}
                         autoComplete="off"
                         className={`h-10 rounded-xl border-none bg-muted/40 focus-visible:ring-primary ${
@@ -139,38 +176,74 @@ export function AdminTopbar({
                         }`}
                     />
 
+                    {/* Search results dropdown */}
                     {searchQuery.trim().length >= 2 && (
                         <div className="absolute left-0 right-0 top-full z-50 mt-2 max-h-80 overflow-y-auto rounded-xl border bg-background p-2 shadow-lg">
                             {isSearching ? (
                                 <p className="p-3 text-sm text-muted-foreground">
-                                    Searching...
+                                    {isArabic
+                                        ? "جارٍ البحث..."
+                                        : "Searching..."}
                                 </p>
                             ) : searchResults.length > 0 ? (
-                                searchResults.map((result) => (
-                                    <button
-                                        key={`${result.type}-${result.id}`}
-                                        type="button"
-                                        onClick={() => {
-                                            router.push(result.href)
-                                            setSearchQuery("")
-                                            setSearchResults([])
-                                        }}
-                                        className="flex w-full flex-col rounded-lg px-3 py-2 text-left hover:bg-muted"
-                                    >
-                                        <span className="text-sm font-medium">
-                                            {result.title}
-                                        </span>
-                                        <span className="text-xs text-muted-foreground">
-                                            {result.type}
-                                            {result.subtitle
-                                                ? ` · ${result.subtitle}`
-                                                : ""}
-                                        </span>
-                                    </button>
-                                ))
+                                <div className="space-y-1">
+                                    {searchResults.map((result) => {
+                                        const Icon =
+                                            result.type === "patient"
+                                                ? UserRound
+                                                : result.type === "doctor"
+                                                ? Stethoscope
+                                                : CalendarDays
+
+                                        return (
+                                            <button
+                                                key={`${result.type}-${result.id}`}
+                                                type="button"
+                                                onClick={() => {
+                                                    router.push(result.href)
+                                                    setSearchQuery("")
+                                                    setSearchResults([])
+                                                }}
+                                                className="flex w-full items-start gap-3 rounded-lg px-3 py-3 text-left transition-colors hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+                                            >
+                                                <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-muted">
+                                                    <Icon className="h-4 w-4 text-muted-foreground" />
+                                                </div>
+
+                                                <div className="min-w-0 flex-1">
+                                                    <p className="truncate text-sm font-medium">
+                                                        {result.title}
+                                                    </p>
+
+                                                    <p className="truncate text-xs text-muted-foreground">
+                                                        {getResultTypeLabel(
+                                                            result.type
+                                                        )}
+                                                        {result.subtitle
+                                                            ? ` · ${result.subtitle}`
+                                                            : ""}
+                                                    </p>
+
+                                                    {result.type ===
+                                                        "appointment" && (
+                                                        <p className="mt-1 text-xs text-muted-foreground">
+                                                            {result.date} ·{" "}
+                                                            {result.time}
+                                                            {result.status
+                                                                ? ` · ${result.status}`
+                                                                : ""}
+                                                        </p>
+                                                    )}
+                                                </div>
+                                            </button>
+                                        )
+                                    })}
+                                </div>
                             ) : (
                                 <p className="p-3 text-sm text-muted-foreground">
-                                    No records found.
+                                    {isArabic
+                                        ? "لم يتم العثور على نتائج."
+                                        : "No records found."}
                                 </p>
                             )}
                         </div>
@@ -178,6 +251,7 @@ export function AdminTopbar({
                 </div>
             </div>
 
+            {/* Admin profile dropdown */}
             <div className="relative" ref={dropdownRef}>
                 <button
                     type="button"
@@ -185,7 +259,9 @@ export function AdminTopbar({
                     aria-expanded={isOpen}
                     aria-haspopup="true"
                     aria-label={
-                        isArabic ? "فتح قائمة الحساب" : "Open account menu"
+                        isArabic
+                            ? "فتح قائمة الحساب"
+                            : "Open account menu"
                     }
                     className="flex items-center gap-3 rounded-xl p-1.5 transition-colors hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
                 >
@@ -216,6 +292,7 @@ export function AdminTopbar({
                             <p className="text-sm font-semibold">
                                 {user?.name || "Admin User"}
                             </p>
+
                             <p
                                 dir="ltr"
                                 className={`text-xs text-muted-foreground ${
@@ -229,6 +306,7 @@ export function AdminTopbar({
                         <div className="space-y-2 p-2">
                             <div className="flex items-center gap-2 text-sm font-medium">
                                 <Languages className="h-4 w-4 text-muted-foreground" />
+
                                 <span>
                                     {isArabic
                                         ? "تغيير اللغة"
@@ -248,4 +326,3 @@ export function AdminTopbar({
         </header>
     )
 }
-
