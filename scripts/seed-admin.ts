@@ -1,9 +1,10 @@
+
 /**
- * Creates (or promotes) the admin account. Admins are intentionally NOT
- * creatable through public signup — see src/app/api/auth/register/route.ts.
+ * Creates or promotes an administrator account.
+ * Admins cannot register through public signup.
  *
- *   ADMIN_EMAIL=you@clinic.com ADMIN_PASSWORD=... ADMIN_NAME="Jane" \
- *     npm run seed:admin
+ * Run with:
+ * npm run seed:admin
  */
 import 'dotenv/config';
 import mongoose from 'mongoose';
@@ -15,42 +16,44 @@ async function main() {
   const name = process.env.ADMIN_NAME?.trim() || 'Administrator';
   const uri = process.env.MONGODB_URI;
 
-  if (!uri) throw new Error('MONGODB_URI is not set');
+  if (!uri) {
+    throw new Error('MONGODB_URI is not set');
+  }
+
   if (!email || !password) {
     throw new Error('ADMIN_EMAIL and ADMIN_PASSWORD are required');
   }
+
   if (password.length < 6) {
     throw new Error('ADMIN_PASSWORD must be at least 6 characters');
   }
 
   await mongoose.connect(uri);
 
-  const existing = await User.findOne({ email });
+  try {
+    const existing = await User.findOne({ email });
 
-  if (existing) {
-    // Promote + reset password, so this script is safe to re-run.
-    existing.name = name;
-    existing.role = 'admin';
-    existing.password = password; // hashed by the pre-save hook
-    await existing.save();
-    const newuser = await User.create(
-      {
-        name: "hajar45" , 
-        email: "hajar@gmail.com",
-        password:"test",
-        role:"admin",
-        phone:"76570155"
-      }
-    )
-    console.log(newuser)
-    
-    console.log(`Promoted existing user to admin: ${email}`);
-  } else {
-    await User.create({ name, email, password, role: 'admin' });
-    console.log(`Created admin: ${email}`);
+    if (existing) {
+      existing.name = name;
+      existing.role = 'admin';
+      existing.password = password;
+
+      await existing.save();
+
+      console.log(`Updated existing admin: ${email}`);
+    } else {
+      await User.create({
+        name,
+        email,
+        password,
+        role: 'admin',
+      });
+
+      console.log(`Created admin: ${email}`);
+    }
+  } finally {
+    await mongoose.disconnect();
   }
-
-  await mongoose.disconnect();
 }
 
 main().catch((error) => {

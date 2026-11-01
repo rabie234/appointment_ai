@@ -1,190 +1,51 @@
-# Authentication System - Implementation Summary
+# Authentication and access control
 
-## ✅ What Has Been Implemented
+ClinicAI has two account roles: patient and admin. Authentication uses NextAuth credentials, MongoDB/Mongoose, bcrypt password hashing, and JWT sessions.
 
-### 1. Database Setup
-- **MongoDB Connection** (`src/lib/mongodb.ts`)
-  - Connection pooling with global cache
-  - Handles reconnection automatically
+## Patient registration
 
-### 2. Database Models
-- **User Model** (`src/models/User.ts`)
-  - Fields: name, email, password, role, phone
-  - Password hashing with bcrypt
-  - Password comparison method
-  - Role: 'patient' | 'admin'
+- The public registration page creates patient accounts only.
+- The role is set on the server; a role sent by the browser or API request is ignored.
+- Passwords are hashed by the User model before saving.
+- After registration, the patient is signed in and redirected to the patient area.
 
-- **Doctor Model** (`src/models/Doctor.ts`)
-  - Complete doctor profile with ratings, availability, working hours
+Do not create an administrator through public registration or by sending role: admin to the registration endpoint.
 
-- **Appointment Model** (`src/models/Appointment.ts`)
-  - References to User and Doctor
-  - Status tracking, date/time, type (video/in-person)
+## Administrator provisioning
 
-### 3. Authentication System
-- **NextAuth.js Configuration** (`src/lib/auth.ts`)
-  - Credentials provider
-  - JWT strategy
-  - Session callbacks with role information
-  - Custom error handling
+Create an administrator locally with the seed script:
 
-### 4. API Routes
-- **POST /api/auth/register**
-  - User registration
-  - Email validation
-  - Password hashing
-  - Duplicate email check
+~~~bash
+ADMIN_EMAIL=admin@clinicai.test ADMIN_PASSWORD=your-strong-password ADMIN_NAME="Clinic Admin" npm run seed:admin
+~~~
 
-- **GET/POST /api/auth/[...nextauth]**
-  - NextAuth endpoints (login, logout, session, callback)
+The script creates or promotes the account matching ADMIN_EMAIL. See [SETUP.md](SETUP.md) for PowerShell, Bash, MongoDB, and demo-data setup instructions. The repository does not provide a shared admin password.
 
-### 5. Authentication Pages
-- **Login Page** (`/auth/login`)
-  - Email/password form
-  - Error handling
-  - Success message after registration
-  - Role-based redirect (admin → /admin/dashboard, patient → /)
+## Sessions and route protection
 
-- **Register Page** (`/auth/register`)
-  - User registration form
-  - Password confirmation
-  - Validation
-  - Redirects to login after success
+- NextAuth uses a JWT session and stores the user's id and role in the session.
+- src/proxy.ts handles the initial route checks. It uses an Edge-safe auth configuration.
+- Server pages and server actions also check roles with src/lib/session.ts. This is important because server actions must enforce authorization themselves.
+- Signed-out users are redirected to /auth/login.
+- Patients can use patient routes; administrators can use /admin/*.
+- Public registration and login routes remain available to signed-out users.
 
-### 6. Route Protection
-- **Middleware** (`src/middleware.ts`)
-  - Protects admin routes (requires admin role)
-  - Protects patient routes (requires authentication)
-  - Redirects authenticated users away from auth pages
-  - Role-based access control
+## Main authentication files
 
-### 7. UI Components
-- **Session Provider** (`src/app/providers.tsx`)
-  - Wraps the app with NextAuth SessionProvider
+- src/lib/auth.ts — credentials provider and database-backed sign-in
+- src/lib/auth.config.ts — Edge-safe JWT and session callbacks
+- src/lib/roles.ts — role-to-route rules
+- src/lib/session.ts — server-side session and role guards
+- src/proxy.ts — route protection
+- src/app/auth/actions.ts — login and patient registration actions
+- src/app/api/auth/register/route.ts — patient registration endpoint
+- src/models/User.ts — user schema and password hashing
 
-- **Updated Navigation**
-  - Admin sidebar with logout functionality
-  - Patient navbar with profile menu and logout
-  - Session-aware components
+## Local verification
 
-### 8. TypeScript Types
-- **NextAuth Type Extensions** (`src/types/next-auth.d.ts`)
-  - Extended Session type with role
-  - Extended JWT type with role
-  - Type-safe authentication throughout the app
+1. Create an administrator with the seed script and demo patients with npm run seed:data.
+2. Sign in as an administrator and confirm /admin/dashboard is available.
+3. Register or use a seeded patient account and confirm patient pages are available.
+4. Confirm a patient cannot access /admin/* and a signed-out user is redirected to sign-in.
 
-## 🔐 Authentication Flow
-
-### Registration Flow
-1. User fills registration form at `/auth/register`
-2. Form validates password match and length
-3. POST request to `/api/auth/register`
-4. User created in MongoDB with hashed password
-5. Redirect to `/auth/login?registered=true`
-6. Success message shown on login page
-
-### Login Flow
-1. User enters credentials at `/auth/login`
-2. NextAuth credentials provider validates
-3. Password compared with bcrypt
-4. JWT token created with user info and role
-5. Session established
-6. Redirect based on role:
-   - Admin → `/admin/dashboard`
-   - Patient → `/`
-
-### Logout Flow
-1. User clicks logout button
-2. `signOut()` called from next-auth/react
-3. Session cleared
-4. Redirect to `/auth/login`
-
-### Route Protection
-- **Admin Routes** (`/admin/*`)
-  - Requires authentication AND admin role
-  - Redirects to login if not authenticated
-  - Redirects to login if not admin
-
-- **Patient Routes** (`/`, `/doctors`, `/appointments`, `/ai-chat`)
-  - Requires authentication
-  - Home page (`/`) is public
-  - Other routes redirect to login if not authenticated
-
-- **Auth Routes** (`/auth/*`)
-  - Redirects to appropriate dashboard if already logged in
-
-## 📁 File Structure
-
-```
-src/
-├── app/
-│   ├── api/
-│   │   └── auth/
-│   │       ├── [...nextauth]/route.ts  # NextAuth endpoints
-│   │       └── register/route.ts        # Registration endpoint
-│   ├── auth/
-│   │   ├── login/page.tsx               # Login page
-│   │   └── register/page.tsx           # Register page
-│   ├── providers.tsx                    # Session provider wrapper
-│   └── layout.tsx                       # Root layout (updated)
-├── components/
-│   └── layout/
-│       ├── admin-sidebar.tsx            # Updated with logout
-│       └── patient-navbar.tsx           # Updated with logout
-├── lib/
-│   ├── auth.ts                         # NextAuth configuration
-│   └── mongodb.ts                      # MongoDB connection
-├── models/
-│   ├── User.ts                         # User model
-│   ├── Doctor.ts                       # Doctor model
-│   └── Appointment.ts                  # Appointment model
-├── middleware.ts                       # Route protection
-└── types/
-    └── next-auth.d.ts                  # TypeScript types
-```
-
-## 🚀 Next Steps
-
-1. **Create Admin User**
-   - Use registration API with role: "admin"
-   - Or manually insert into MongoDB
-
-2. **Test Authentication**
-   - Register a patient account
-   - Register an admin account
-   - Test login/logout
-   - Test route protection
-
-3. **Connect Frontend to Backend**
-   - Create API routes for doctors
-   - Create API routes for appointments
-   - Update pages to fetch real data
-
-4. **Add Features**
-   - Profile management
-   - Password reset
-   - Email verification
-   - Remember me functionality
-
-## 🔧 Environment Variables Required
-
-Create `.env.local`:
-
-```env
-MONGODB_URI=mongodb://localhost:27017/appointment_ai
-NEXTAUTH_URL=http://localhost:3000
-NEXTAUTH_SECRET=your-secret-key-here
-```
-
-Generate secret:
-```bash
-openssl rand -base64 32
-```
-
-## 📝 Notes
-
-- Passwords are automatically hashed before saving
-- Sessions use JWT strategy (stateless)
-- Role-based access control is enforced at middleware level
-- All authentication is handled server-side for security
-- TypeScript types ensure type safety throughout
+For environment variables and setup steps, see [ENV_SETUP.md](ENV_SETUP.md) and [SETUP.md](SETUP.md).
