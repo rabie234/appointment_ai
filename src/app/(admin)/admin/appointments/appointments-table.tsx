@@ -142,39 +142,41 @@ export function AppointmentsTable({
     initialSelectedAppointmentId,
     initialStatus,
 }: AppointmentsTableProps) {
-  const [filter, setFilter] = useState<(typeof FILTERS)[number]>(() => {
-    if (
-        initialStatus &&
-        FILTERS.some((item) => item === initialStatus)
-    ) {
-        return initialStatus as (typeof FILTERS)[number]
-    }
-
-    return "All"
-})
-
-        useEffect(() => {
-    if (!initialSelectedAppointmentId) return
-
-    const selected = appointments.find(
+    const selectedAppointment = appointments.find(
         (appointment) => appointment.id === initialSelectedAppointmentId
     )
 
-    if (!selected) return
+    const [filterOverride, setFilterOverride] = useState<
+        (typeof FILTERS)[number] | null
+    >(() => {
+        if (initialStatus && FILTERS.some((item) => item === initialStatus)) {
+            return initialStatus as (typeof FILTERS)[number]
+        }
 
-    setFilter(selected.status)
+        return null
+    })
 
-    const timer = window.setTimeout(() => {
-        document
-            .getElementById(`appointment-${initialSelectedAppointmentId}`)
-            ?.scrollIntoView({
-                behavior: "smooth",
-                block: "center",
-            })
-    }, 100)
+    // Use the selected appointment's status as the default filter
+    // when navigating from Global Search.
+    const filter =
+        filterOverride ?? selectedAppointment?.status ?? "All"
 
-    return () => window.clearTimeout(timer)
-}, [initialSelectedAppointmentId, appointments])
+    // Scroll to the selected appointment when arriving from Global Search.
+    useEffect(() => {
+        if (!initialSelectedAppointmentId) return
+
+        const timer = window.setTimeout(() => {
+            document
+                .getElementById(`appointment-${initialSelectedAppointmentId}`)
+                ?.scrollIntoView({
+                    behavior: "smooth",
+                    block: "center",
+                })
+        }, 100)
+
+        return () => window.clearTimeout(timer)
+    }, [initialSelectedAppointmentId, appointments])
+
     const [createOpen, setCreateOpen] = useState(false)
     const { language } = useLanguage()
     const isArabic = language === "ar"
@@ -182,12 +184,18 @@ export function AppointmentsTable({
     const filtered =
         filter === "All"
             ? appointments
-            : appointments.filter((appointment) => appointment.status === filter)
+            : appointments.filter(
+                  (appointment) => appointment.status === filter
+              )
 
-    const counts = appointments.reduce<Record<string, number>>((acc, appointment) => {
-        acc[appointment.status] = (acc[appointment.status] ?? 0) + 1
-        return acc
-    }, {})
+    const counts = appointments.reduce<Record<string, number>>(
+        (acc, appointment) => {
+            acc[appointment.status] =
+                (acc[appointment.status] ?? 0) + 1
+            return acc
+        },
+        {}
+    )
 
     return (
         <div
@@ -201,7 +209,10 @@ export function AppointmentsTable({
                         {t(language, "Appointments Management")}
                     </h1>
                     <p className="mt-1 text-sm text-muted-foreground">
-                        {t(language, "Review, confirm, and cancel clinic appointments.")}
+                        {t(
+                            language,
+                            "Review, confirm, and cancel clinic appointments."
+                        )}
                     </p>
                 </div>
 
@@ -226,7 +237,7 @@ export function AppointmentsTable({
                         <button
                             key={item}
                             type="button"
-                            onClick={() => setFilter(item)}
+                            onClick={() => setFilterOverride(item)}
                             className={cn(
                                 "inline-flex items-center gap-2 whitespace-nowrap rounded-lg border px-3 py-2 text-sm font-medium transition-colors",
                                 filter === item
@@ -239,7 +250,9 @@ export function AppointmentsTable({
                                     ? t(language, "All")
                                     : t(language, STATUS_LABEL[item])}
                             </span>
-                            <span className="text-xs opacity-75">{count}</span>
+                            <span className="text-xs opacity-75">
+                                {count}
+                            </span>
                         </button>
                     )
                 })}
@@ -288,20 +301,23 @@ export function AppointmentsTable({
                                 >
                                     {appointments.length === 0
                                         ? t(language, "No appointments yet.")
-                                        : t(language, "No appointments in this category.")}
+                                        : t(
+                                              language,
+                                              "No appointments in this category."
+                                          )}
                                 </TableCell>
                             </TableRow>
                         ) : (
                             filtered.map((app) => (
-                              <TableRow
-    key={app.id}
-    id={`appointment-${app.id}`}
-    className={`border-muted/30 align-middle transition-colors hover:bg-accent/30 ${
-        app.id === initialSelectedAppointmentId
-            ? "bg-primary/10 ring-1 ring-inset ring-primary"
-            : ""
-    }`}
->
+                                <TableRow
+                                    key={app.id}
+                                    id={`appointment-${app.id}`}
+                                    className={`border-muted/30 align-middle transition-colors hover:bg-accent/30 ${
+                                        app.id === initialSelectedAppointmentId
+                                            ? "bg-primary/10 ring-1 ring-inset ring-primary"
+                                            : ""
+                                    }`}
+                                >
                                     {/* Patient */}
                                     <TableCell className="px-4 py-4 text-start">
                                         <span
@@ -340,12 +356,16 @@ export function AppointmentsTable({
                                         {app.type === "video" ? (
                                             <div className="flex items-center gap-1.5 whitespace-nowrap text-xs font-semibold text-blue-600">
                                                 <Video className="h-3.5 w-3.5 shrink-0" />
-                                                <span>{t(language, "Tele-health")}</span>
+                                                <span>
+                                                    {t(language, "Tele-health")}
+                                                </span>
                                             </div>
                                         ) : (
                                             <div className="flex items-center gap-1.5 whitespace-nowrap text-xs font-semibold text-orange-600">
                                                 <MapPin className="h-3.5 w-3.5 shrink-0" />
-                                                <span>{t(language, "In-Clinic")}</span>
+                                                <span>
+                                                    {t(language, "In-Clinic")}
+                                                </span>
                                             </div>
                                         )}
                                     </TableCell>
@@ -371,7 +391,8 @@ export function AppointmentsTable({
                                                 <span className="flex items-center gap-1 text-[11px] text-muted-foreground">
                                                     <LogIn className="h-3 w-3 shrink-0 text-blue-500" />
                                                     <span>
-                                                        {t(language, "Arrived")} {app.startedAt}
+                                                        {t(language, "Arrived")}{" "}
+                                                        {app.startedAt}
                                                     </span>
                                                 </span>
                                             )}
@@ -380,7 +401,8 @@ export function AppointmentsTable({
                                                 <span className="flex items-center gap-1 text-[11px] text-muted-foreground">
                                                     <LogOut className="h-3 w-3 shrink-0 text-emerald-600" />
                                                     <span>
-                                                        {t(language, "Left")} {app.completedAt}
+                                                        {t(language, "Left")}{" "}
+                                                        {app.completedAt}
                                                     </span>
                                                 </span>
                                             )}
@@ -497,16 +519,23 @@ function CreateDialog({
         FormData
     >(adminCreateAppointment, {})
 
+    // Load available slots when the selected doctor or date changes.
     useEffect(() => {
-        if (!doctorId) {
-            setSlots([])
-            return
-        }
+        if (!doctorId) return
+
+        let cancelled = false
 
         startLoadingSlots(async () => {
             const result = await getDoctorSlots(doctorId, date)
-            setSlots(result.slots ?? [])
+
+            if (!cancelled) {
+                setSlots(result.slots ?? [])
+            }
         })
+
+        return () => {
+            cancelled = true
+        }
     }, [doctorId, date])
 
     useEffect(() => {
@@ -517,11 +546,13 @@ function CreateDialog({
 
     function pickDoctor(value: string) {
         setTime("")
+        setSlots([])
         setDoctorId(value)
     }
 
     function pickDate(value: string) {
         setTime("")
+        setSlots([])
         setDate(value)
     }
 

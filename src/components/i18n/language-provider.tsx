@@ -1,4 +1,5 @@
-﻿"use client";
+﻿
+"use client";
 
 import {
     createContext,
@@ -18,42 +19,67 @@ type LanguageContextValue = {
 
 const LanguageContext = createContext<LanguageContextValue | null>(null);
 
-export function LanguageProvider({ children }: { children: ReactNode }) {
+export function LanguageProvider({
+    children,
+}: {
+    children: ReactNode;
+}) {
     const [language, setLanguageState] = useState<Language>("en");
     const [ready, setReady] = useState(false);
 
     useEffect(() => {
-        const saved = localStorage.getItem("clinicai-language");
-        const cookie = document.cookie
-            .split("; ")
-            .find((item) => item.startsWith("clinicai-language="))
-            ?.split("=")[1];
+        const timer = window.setTimeout(() => {
+            const saved = localStorage.getItem("clinicai-language");
 
-        const preferred = saved || cookie;
+            const cookie = document.cookie
+                .split("; ")
+                .find((item) =>
+                    item.startsWith("clinicai-language=")
+                )
+                ?.split("=")[1];
 
-        if (preferred === "ar" || preferred === "en") {
-            setLanguageState(preferred);
-        } else if (navigator.language.toLowerCase().startsWith("ar")) {
-            setLanguageState("ar");
-        }
+            const preferred = saved || cookie;
 
-        setReady(true);
+            if (preferred === "ar" || preferred === "en") {
+                setLanguageState(preferred);
+            } else if (
+                navigator.language.toLowerCase().startsWith("ar")
+            ) {
+                setLanguageState("ar");
+            }
+
+            setReady(true);
+        }, 0);
+
+        return () => {
+            window.clearTimeout(timer);
+        };
     }, []);
 
     useEffect(() => {
         document.documentElement.lang = language;
-        document.documentElement.dir = language === "ar" ? "rtl" : "ltr";
-        document.documentElement.setAttribute("data-language", language);
+        document.documentElement.dir =
+            language === "ar" ? "rtl" : "ltr";
+
+        document.documentElement.setAttribute(
+            "data-language",
+            language
+        );
     }, [language]);
 
     const setLanguage = useCallback((next: Language) => {
         setLanguageState(next);
+
         localStorage.setItem("clinicai-language", next);
-        document.cookie = `clinicai-language=${next}; path=/; max-age=31536000; SameSite=Lax`;
+
+        document.cookie =
+            `clinicai-language=${next}; path=/; max-age=31536000; SameSite=Lax`;
     }, []);
 
     return (
-        <LanguageContext.Provider value={{ language, setLanguage }}>
+        <LanguageContext.Provider
+            value={{ language, setLanguage }}
+        >
             <div data-language-ready={ready ? "true" : "false"}>
                 {children}
             </div>
@@ -65,7 +91,9 @@ export function useLanguage() {
     const context = useContext(LanguageContext);
 
     if (!context) {
-        throw new Error("useLanguage must be used inside LanguageProvider");
+        throw new Error(
+            "useLanguage must be used inside LanguageProvider"
+        );
     }
 
     return context;

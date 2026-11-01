@@ -12,6 +12,7 @@ import {
 } from '@/lib/schedule';
 import Appointment from '@/models/Appointment';
 import Doctor from '@/models/Doctor';
+import { parseCalendarDate as parseDay } from '@/lib/date-validation'
 
 export type AppointmentActionState = { error?: string; success?: boolean };
 
@@ -108,11 +109,7 @@ export async function markAppointmentMissed(id: string) {
 const CONSULTATION_FEE = 120;
 
 /** Parse "YYYY-MM-DD" into a UTC-midnight date. null if malformed. */
-function parseDay(value: string): Date | null {
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return null;
-  const date = new Date(`${value}T00:00:00.000Z`);
-  return Number.isNaN(date.getTime()) ? null : date;
-}
+
 
 function dayBounds(date: Date): { start: Date; end: Date } {
   const start = new Date(date);

@@ -17,7 +17,6 @@ import {
 } from "lucide-react"
 import {
     getAvailableSlots,
-    getDoctorLeaveDates,
     bookAppointment,
     type BookingState,
 } from "./actions"
@@ -74,7 +73,6 @@ export function BookingPanel({
     const { language } = useLanguage()
     const days = upcomingDays(14, language)
     const [selectedDate, setSelectedDate] = useState(days[0].value)
-    const [leaveDates, setLeaveDates] = useState<string[]>([])
     const [selectedTime, setSelectedTime] = useState<string | null>(null)
     const [type, setType] = useState<"in-person" | "video">("in-person")
     const [slots, setSlots] = useState<string[]>([])
@@ -99,23 +97,6 @@ const [rescheduling, setRescheduling] = useState(false)
         setSelectedTime(null)
         setSelectedDate(value)
     }
-    useEffect(() => {
-    if (!active) return
-
-    let cancelled = false
-
-    getDoctorLeaveDates(doctorId, days.map((day) => day.value))
-        .then((dates) => {
-            if (!cancelled) setLeaveDates(dates)
-        })
-        .catch((error) => {
-            console.error("Failed to load doctor leave dates:", error)
-        })
-
-    return () => {
-        cancelled = true
-    }
-}, [doctorId, active])
    async function handleBookingSubmit(
     event: React.FormEvent<HTMLFormElement>
 ) {

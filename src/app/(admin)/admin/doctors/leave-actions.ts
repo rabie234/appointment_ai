@@ -61,12 +61,12 @@ export async function createDoctorLeave(
   exclusiveEnd.setUTCDate(exclusiveEnd.getUTCDate() + 1);
 
   try {
-    const leave = await DoctorLeave.create({
-      doctor: doctor._id,
-      startDate,
-      endDate: exclusiveEnd,
-      reason: reason || undefined,
-    });
+    await DoctorLeave.create({
+  doctor: doctor._id,
+  startDate,
+  endDate: exclusiveEnd,
+  reason: reason || undefined,
+});
 
     const affected = await Appointment.updateMany(
       {

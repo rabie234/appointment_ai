@@ -80,15 +80,6 @@ function badgeVariant(status: Status) {
 }
 
 
-function to12h(time: string): string {
-    const [h, m] = time.split(":").map(Number);
-    if (Number.isNaN(h)) return time;
-
-    const period = h >= 12 ? "PM" : "AM";
-    const hour12 = h % 12 === 0 ? 12 : h % 12;
-
-    return `${hour12}:${String(m).padStart(2, "0")} ${period}`;
-}
 
 // Appointment dates are stored as UTC midnight, so format them in UTC.
 const shortDay = new Intl.DateTimeFormat("en-US", { weekday: "short", timeZone: "UTC" })
@@ -276,7 +267,6 @@ export default async function AdminDashboardPage() {
     .filter((doctor) => doctor.availability === "available")
     .map((doctor) => normalizeWeek(doctor.schedule))
 
-201
     const bookedByDay = new Map(weekCounts.map((w) => [new Date(w._id).toISOString().slice(0, 10), w.count]))
 
     const week: CapacityDay[] = Array.from({ length: 7 }, (_, i) => {

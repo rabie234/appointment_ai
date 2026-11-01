@@ -208,14 +208,6 @@ export function AppointmentsList({
         }
     }
 
-    function openReschedule(appointment: AppointmentCard) {
-        setReschedulingId(appointment.id)
-        setSelectedDate("")
-        setSelectedTime("")
-        setAvailableSlots([])
-        setMessage("")
-    }
-
     function closeReschedule() {
         setReschedulingId(null)
         setSelectedDate("")

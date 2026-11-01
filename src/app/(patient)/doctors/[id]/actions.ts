@@ -13,13 +13,14 @@ import {
 import Doctor from '@/models/Doctor';
 import Appointment from '@/models/Appointment';
 import DoctorLeave from '@/models/DoctorLeave';
-
+import { parseCalendarDate as parseDay } from '@/lib/date-validation'
 /** Parse a "YYYY-MM-DD" value into a UTC date at midnight. null if malformed. */
-function parseDay(value: string): Date | null {
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return null;
-  const date = new Date(`${value}T00:00:00.000Z`);
-  return Number.isNaN(date.getTime()) ? null : date;
-}
+
+/**
+ * Parse a real calendar date in YYYY-MM-DD format.
+ * Returns UTC midnight, or null if the date is invalid.
+ */
+
 
 /** The [start, end) UTC bounds of the given day, for querying appointments. */
 function dayBounds(date: Date): { start: Date; end: Date } {

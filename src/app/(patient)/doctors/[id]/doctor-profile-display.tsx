@@ -2,6 +2,7 @@
 "use client"
 
 import Link from "next/link"
+import type { ReactNode } from "react"
 import { Card, CardContent } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import {
@@ -12,7 +13,10 @@ import {
     Award,
     BookOpen,
 } from "lucide-react"
-import { useLanguage } from "@/components/i18n/language-provider"
+import {
+    useLanguage,
+    type Language,
+} from "@/components/i18n/language-provider"
 import { t } from "@/components/i18n/translations"
 import { BookingPanel } from "./booking-panel"
 
@@ -37,6 +41,45 @@ type WorkingDay = {
     close: string
 }
 
+type StatCardProps = {
+    icon: ReactNode
+    tone: "blue" | "emerald" | "orange"
+    label: string
+    value: string
+    language: Language
+}
+
+const STAT_CARD_TONES = {
+    blue: "bg-blue-100 text-blue-600 dark:bg-blue-900/30 dark:text-blue-400",
+    emerald: "bg-emerald-100 text-emerald-600 dark:bg-emerald-900/30 dark:text-emerald-400",
+    orange: "bg-orange-100 text-orange-600 dark:bg-orange-900/30 dark:text-orange-400",
+}
+
+function StatCard({
+    icon,
+    tone,
+    label,
+    value,
+    language,
+}: StatCardProps) {
+    return (
+        <Card className="bg-card/50 border-none shadow-sm">
+            <CardContent className="p-4 flex items-center gap-3">
+                <div className={`p-2 rounded-lg ${STAT_CARD_TONES[tone]}`}>
+                    {icon}
+                </div>
+
+                <div>
+                    <p className="text-xs text-muted-foreground">
+                        {t(language, label)}
+                    </p>
+                    <p className="text-sm font-bold">{value}</p>
+                </div>
+            </CardContent>
+        </Card>
+    )
+}
+
 export default function DoctorProfileDisplay({
     doctor,
     workingDays,
@@ -56,6 +99,7 @@ export default function DoctorProfileDisplay({
 
     function formatExperience(value: string | number) {
         const match = String(value).match(/\d+/)
+
         if (!match) return String(value)
 
         const number = match[0]
@@ -67,6 +111,7 @@ export default function DoctorProfileDisplay({
 
     function formatTime(time: string) {
         const [hours, minutes] = time.split(":").map(Number)
+
         const date = new Date()
         date.setHours(hours, minutes, 0, 0)
 
@@ -76,46 +121,12 @@ export default function DoctorProfileDisplay({
                 hour: "numeric",
                 minute: "2-digit",
                 hour12: true,
-            },
+            }
         ).format(date)
     }
 
     function translateDay(day: string) {
         return t(language, day)
-    }
-
-    const tones = {
-        blue: "bg-blue-100 text-blue-600 dark:bg-blue-900/30 dark:text-blue-400",
-        emerald: "bg-emerald-100 text-emerald-600 dark:bg-emerald-900/30 dark:text-emerald-400",
-        orange: "bg-orange-100 text-orange-600 dark:bg-orange-900/30 dark:text-orange-400",
-    }
-
-    function StatCard({
-        icon,
-        tone,
-        label,
-        value,
-    }: {
-        icon: React.ReactNode
-        tone: "blue" | "emerald" | "orange"
-        label: string
-        value: string
-    }) {
-        return (
-            <Card className="bg-card/50 border-none shadow-sm">
-                <CardContent className="p-4 flex items-center gap-3">
-                    <div className={`p-2 rounded-lg ${tones[tone]}`}>
-                        {icon}
-                    </div>
-                    <div>
-                        <p className="text-xs text-muted-foreground">
-                            {t(language, label)}
-                        </p>
-                        <p className="text-sm font-bold">{value}</p>
-                    </div>
-                </CardContent>
-            </Card>
-        )
     }
 
     return (
@@ -128,7 +139,9 @@ export default function DoctorProfileDisplay({
                 className="inline-flex items-center text-sm font-medium text-muted-foreground hover:text-primary transition-colors"
             >
                 <ChevronLeft
-                    className={`me-1 h-4 w-4 ${isArabic ? "rotate-180" : ""}`}
+                    className={`me-1 h-4 w-4 ${
+                        isArabic ? "rotate-180" : ""
+                    }`}
                 />
                 {t(language, "Back to search")}
             </Link>
@@ -170,7 +183,7 @@ export default function DoctorProfileDisplay({
                                         language,
                                         doctor.availability === "available"
                                             ? "Available"
-                                            : "On Leave",
+                                            : "On Leave"
                                     )}
                                 </Badge>
                             </div>
@@ -182,12 +195,14 @@ export default function DoctorProfileDisplay({
                             <div className="flex flex-wrap items-center gap-4 text-sm text-muted-foreground">
                                 <div className="flex items-center">
                                     <Star className="h-4 w-4 text-amber-500 fill-current me-1" />
+
                                     <span
                                         dir="ltr"
                                         className="font-bold text-foreground"
                                     >
                                         {doctor.rating.toFixed(1)}
                                     </span>
+
                                     <span className="ms-1">
                                         ({doctor.reviews}{" "}
                                         {t(language, "reviews")})
@@ -212,6 +227,7 @@ export default function DoctorProfileDisplay({
                                     ? formatExperience(doctor.experience)
                                     : "—"
                             }
+                            language={language}
                         />
 
                         <StatCard
@@ -219,6 +235,7 @@ export default function DoctorProfileDisplay({
                             tone="emerald"
                             label="Success Rate"
                             value={`${doctor.successRate}%`}
+                            language={language}
                         />
 
                         <StatCard
@@ -226,8 +243,9 @@ export default function DoctorProfileDisplay({
                             tone="orange"
                             label="Total Patients"
                             value={doctor.totalPatients.toLocaleString(
-                                isArabic ? "en-GB" : "en-US",
+                                isArabic ? "en-GB" : "en-US"
                             )}
+                            language={language}
                         />
                     </section>
 
@@ -241,7 +259,7 @@ export default function DoctorProfileDisplay({
                                 <p className="px-6 py-4 text-sm text-muted-foreground">
                                     {t(
                                         language,
-                                        "No working hours set for this doctor yet.",
+                                        "No working hours set for this doctor yet."
                                     )}
                                 </p>
                             ) : (
@@ -255,6 +273,7 @@ export default function DoctorProfileDisplay({
                                                 <td className="px-6 py-3 font-medium">
                                                     {translateDay(item.day)}
                                                 </td>
+
                                                 <td
                                                     dir="ltr"
                                                     className="px-6 py-3 text-muted-foreground text-start"

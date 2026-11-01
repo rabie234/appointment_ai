@@ -10,7 +10,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { HeartPulse, Loader2 } from "lucide-react"
 import { useLanguage } from "@/components/i18n/language-provider"
 import { t } from "@/components/i18n/translations"
-import { LanguageSwitcher } from "@/components/i18n/language-switcher"
+
 const fields = [
     { id: "name", label: "Full Name", type: "text", placeholder: "John Doe", autoComplete: "name" },
     { id: "email", label: "Email", type: "email", placeholder: "name@example.com", autoComplete: "email" },
