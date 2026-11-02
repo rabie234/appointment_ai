@@ -171,6 +171,9 @@ const translations = {
 "Sunday": "الأحد",
 "ENT (Otolaryngology)": "الأنف والأذن والحنجرة",
 "Otolaryngology": "طب الأنف والأذن والحنجرة",
+"Doctor Panel": "لوحة الطبيب",
+"My Account": "حسابي",
+"Cancelled by the doctor": "ألغى الطبيب الموعد",
 "Appointment cancellation": "طلب إلغاء موعد",
 "The appointment will not be cancelled until you confirm.": "لن يُلغى الموعد إلا بعد تأكيدك.",
 "Cancelling...": "جارٍ الإلغاء...",
@@ -456,6 +459,17 @@ const translations = {
 "Configure clinic-wide preferences": "إعداد التفضيلات العامة للعيادة",
 
 
+    "Login password (optional)": "كلمة مرور الدخول (اختياري)",
+    "Set one so the doctor can sign in with their email": "عيّن كلمة مرور ليتمكن الطبيب من تسجيل الدخول ببريده الإلكتروني",
+    "Reset Password": "إعادة تعيين كلمة المرور",
+    "Enable Doctor Login": "تفعيل دخول الطبيب",
+    "Enable Login": "تفعيل الدخول",
+    "New Password": "كلمة المرور الجديدة",
+    "The doctor signs in with": "يسجّل الطبيب الدخول باستخدام",
+    "and can then manage their own appointments, profile and working hours.": "ويمكنه بعد ذلك إدارة مواعيده وملفه الشخصي وساعات عمله.",
+    "Login": "دخول",
+    "Reset login password": "إعادة تعيين كلمة مرور الدخول",
+    "Enable doctor login": "تفعيل دخول الطبيب",
 } as const;
 
 export function t(language: Language, text: string): string {

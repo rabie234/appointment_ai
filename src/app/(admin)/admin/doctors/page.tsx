@@ -32,6 +32,7 @@ export default async function AdminDoctorsPage() {
         specialty: d.specialty,
         email: d.email,
         phone: d.phone ?? "",
+        hasLogin: Boolean(d.user),
         experience: d.experience ?? "",
         status: d.status,
         availability: d.availability,

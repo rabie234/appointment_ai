@@ -13,71 +13,21 @@ import {
 import Appointment from '@/models/Appointment';
 import Doctor from '@/models/Doctor';
 import { parseCalendarDate as parseDay } from '@/lib/date-validation'
+import { applyTransition, type NextStatus } from '@/lib/appointment-transitions';
 
 export type AppointmentActionState = { error?: string; success?: boolean };
 
-type Status = 'pending' | 'confirmed' | 'in-progress' | 'completed' | 'cancelled' | 'missed';
-type NextStatus = 'confirmed' | 'in-progress' | 'completed' | 'cancelled'|'missed';
-
-// The statuses an admin is allowed to set, and which current states each may
-// come from. Guards against nonsensical transitions (e.g. completing a visit
-// that never started, or reviving a cancelled one). The visit lifecycle is
-// pending → confirmed → in-progress → completed, with cancel available until
-// the visit starts.
-const TRANSITIONS: Record<NextStatus, Status[]> = {
-  confirmed: ['pending'],
-  'in-progress': ['pending', 'confirmed'],
-  completed: ['in-progress'],
-  cancelled: ['pending', 'confirmed'],
-  missed: ['pending', 'confirmed'],
-};
-
-async function transition(id: string, next: NextStatus,cancellationReason?: string): Promise<AppointmentActionState> {
+async function transition(id: string, next: NextStatus, cancellationReason?: string): Promise<AppointmentActionState> {
   await requireRole('admin');
-  if (!id) return { error: 'Missing appointment id' };
-
-  await connectDB();
-
- const appt = await Appointment.findById(id).select('status startedAt completedAt date time');
-  if (!appt) return { error: 'Appointment not found' };
-
-  if (!TRANSITIONS[next].includes(appt.status)) {
-    return { error: `Cannot move a ${appt.status} appointment to ${next}` };
+  const result = await applyTransition({ id, next, cancellationReason });
+  if (result.success) {
+    revalidatePath('/appointments');
+    revalidatePath('/admin/appointments');
+    revalidatePath('/doctor/appointments');
   }
-if (next === 'missed') {
-  const appointmentEnd = new Date(appt.date);
-  const [hours, minutes] = appt.time.split(':').map(Number);
-
-  appointmentEnd.setHours(hours, minutes, 0, 0);
-
-  if (appointmentEnd >= new Date()) {
-    return { error: 'This appointment time has not passed yet.' };
-  }
+  return result;
 }
-  try {
-  appt.status = next;
 
-  if (next === 'in-progress') appt.startedAt = new Date();
-  if (next === 'completed') appt.completedAt = new Date();
-
-  if (next === 'cancelled') {
-    appt.cancellationReason = cancellationReason?.trim() || undefined;
-  }
-
-  await appt.save();
-} catch (error) {
-    console.error(`Set appointment ${next} failed:`, error);
-
-    return {
-        error: error instanceof Error
-            ? error.message
-            : 'Could not update the appointment. Please try again.',
-    };
-}
-revalidatePath('/patient/appointments');
-revalidatePath('/admin/appointments');
-return { success: true };
-}
 export async function confirmAppointment(id: string) {
   return transition(id, 'confirmed');
 }

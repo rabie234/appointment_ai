@@ -25,6 +25,7 @@ import {
     Stethoscope,
     Loader2,
     CalendarClock,
+    KeyRound
 } from "lucide-react"
 import { WeekEditor } from "@/components/schedule/week-editor"
 import { DAYS, type DayHours } from "@/lib/schedule"
@@ -33,6 +34,7 @@ import {
     updateDoctor,
     deleteDoctor,
     updateDoctorSchedule,
+    setDoctorLogin,
     createSpecialty,
     deleteSpecialty,
     type DoctorFormState,
@@ -52,6 +54,8 @@ export type DoctorRow = {
     specialty: string
     email: string
     phone: string
+    /** Whether this doctor can sign in to the doctor area. */
+    hasLogin: boolean
     experience: string
     status: "active" | "inactive"
     availability: "available" | "on-leave"
@@ -198,6 +202,18 @@ function DoctorDialog({
                         />
                     </Field>
                 </div>
+
+                {!isEdit && (
+                    <Field label={t(language, "Login password (optional)")}>
+                        <Input
+                            name="password"
+                            type="password"
+                            autoComplete="new-password"
+                            minLength={6}
+                            placeholder={t(language, "Set one so the doctor can sign in with their email")}
+                        />
+                    </Field>
+                )}
 
                 <Field label={t(language, "Experience")}>
                     <Input
@@ -441,6 +457,63 @@ function ScheduleDialog({
     )
 }
 
+// ── Doctor login modal ────────────────────────────────────────────────────
+
+function LoginDialog({ doctor, onClose }: { doctor: DoctorRow; onClose: () => void }) {
+    const { language } = useLanguage()
+    const [state, formAction] = useActionState<DoctorFormState, FormData>(setDoctorLogin, {})
+
+    useEffect(() => {
+        if (state.success) onClose()
+    }, [state.success, onClose])
+
+    return (
+        <Overlay onClose={onClose}>
+            <div className="flex items-center justify-between border-b p-5">
+                <div>
+                    <h2 className="text-lg font-bold">{t(language, doctor.hasLogin ? "Reset Password" : "Enable Doctor Login")}</h2>
+                    <p className="text-sm text-muted-foreground">{doctor.name}</p>
+                </div>
+                <button onClick={onClose} className="text-muted-foreground hover:text-foreground">
+                    <X className="h-5 w-5" />
+                </button>
+            </div>
+
+            <form action={formAction} className="space-y-4 p-5">
+                <input type="hidden" name="id" value={doctor.id} />
+
+                <div className="rounded-md bg-muted/40 px-3 py-2 text-xs text-muted-foreground">
+                    {t(language, "The doctor signs in with")}{" "}
+                    <span className="font-semibold text-foreground">{doctor.email}</span>{" "}
+                    {t(language, "and can then manage their own appointments, profile and working hours.")}
+                </div>
+
+                <Field label={t(language, doctor.hasLogin ? "New Password" : "Password")}>
+                    <Input
+                        name="password"
+                        type="password"
+                        autoComplete="new-password"
+                        minLength={6}
+                        required
+                        placeholder={t(language, "At least 6 characters")}
+                    />
+                </Field>
+
+                {state.error && (
+                    <p className="rounded-md bg-destructive/10 px-3 py-2 text-sm font-medium text-destructive">
+                        {state.error}
+                    </p>
+                )}
+
+                <div className="flex justify-end gap-3 pt-2">
+                    <Button type="button" variant="outline" onClick={onClose}>{t(language, "Cancel")}</Button>
+                    <SubmitButton>{t(language, doctor.hasLogin ? "Reset Password" : "Enable Login")}</SubmitButton>
+                </div>
+            </form>
+        </Overlay>
+    )
+}
+
 // Specialties modal
 function SpecialtiesDialog({
     specialties,
@@ -631,6 +704,7 @@ export function DoctorsManager({
         null | { mode: "create" } | { mode: "edit"; doctor: DoctorRow }
     >(null)
     const [scheduleFor, setScheduleFor] = useState<DoctorRow | null>(null)
+    const [loginFor, setLoginFor] = useState<DoctorRow | null>(null)
     const [specialtiesOpen, setSpecialtiesOpen] = useState(false)
     const [leaveDialogOpen, setLeaveDialogOpen] = useState(false)
 
@@ -771,6 +845,11 @@ export function DoctorsManager({
                                                 <span className="text-xs text-muted-foreground">
                                                     {doctor.email}
                                                 </span>
+                                                {doctor.hasLogin && (
+                                                    <span className="ml-2 inline-flex items-center gap-1 text-[10px] font-semibold uppercase tracking-wide text-emerald-600">
+                                                        <KeyRound className="h-3 w-3" /> {t(language, "Login")}
+                                                    </span>
+                                                )}
                                             </div>
                                         </div>
                                     </TableCell>
@@ -863,6 +942,18 @@ export function DoctorsManager({
                                                 variant="ghost"
                                                 size="icon"
                                                 className="h-8 w-8 text-muted-foreground hover:text-primary"
+                                                onClick={() => setLoginFor(doctor)}
+                                                title={t(language, doctor.hasLogin ? "Reset login password" : "Enable doctor login")}
+                                                aria-label={t(language, doctor.hasLogin ? "Reset login password" : "Enable doctor login")}
+                                            >
+                                                <KeyRound className="h-4 w-4" />
+                                            </Button>
+
+                                            <Button
+                                                type="button"
+                                                variant="ghost"
+                                                size="icon"
+                                                className="h-8 w-8 text-muted-foreground hover:text-primary"
                                                 onClick={() =>
                                                     setDialog({
                                                         mode: "edit",
@@ -919,7 +1010,7 @@ export function DoctorsManager({
                     onClose={() => setScheduleFor(null)}
                 />
             )}
-
+            {loginFor && <LoginDialog doctor={loginFor} onClose={() => setLoginFor(null)} />}
             {specialtiesOpen && (
                 <SpecialtiesDialog
                     specialties={specialties}

@@ -19,6 +19,8 @@ export interface IDoctor extends Document {
   status: 'active' | 'inactive';
   availability: 'available' | 'on-leave';
   joinedDate: Date;
+  /** The login account (role 'doctor') this profile belongs to, once the admin enables one. */
+  user?: mongoose.Types.ObjectId;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -105,6 +107,12 @@ const DoctorSchema = new Schema<IDoctor>(
     joinedDate: {
       type: Date,
       default: Date.now,
+    },
+    user: {
+      type: Schema.Types.ObjectId,
+      ref: 'User',
+      unique: true,
+      sparse: true,
     },
   },
   {

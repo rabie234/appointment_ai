@@ -12,9 +12,11 @@ import {
   weekFromFormData,
 } from '@/lib/schedule';
 import Doctor from '@/models/Doctor';
+import User from '@/models/User';
 import Specialty from '@/models/Specialty';
 
 const EMAIL_PATTERN = /^\S+@\S+\.\S+$/;
+const MIN_PASSWORD_LENGTH = 6;
 
 export type DoctorFormState = { error?: string; success?: boolean };
 
@@ -40,6 +42,8 @@ export async function createDoctor(
   const experience = String(formData.get('experience') ?? '').trim();
   const status = String(formData.get('status') ?? 'active');
   const availability = String(formData.get('availability') ?? 'available');
+  // Optional: filling it in also creates the doctor's login.
+  const password = String(formData.get('password') ?? '');
 
   if (!name || !specialty || !email) {
     return { error: 'Name, specialty and email are required' };
@@ -47,15 +51,29 @@ export async function createDoctor(
   if (!EMAIL_PATTERN.test(email)) {
     return { error: 'Please provide a valid email' };
   }
+  if (password && password.length < MIN_PASSWORD_LENGTH) {
+    return { error: `Password must be at least ${MIN_PASSWORD_LENGTH} characters` };
+  }
 
   await connectDB();
 
   if (await Doctor.exists({ email })) {
     return { error: 'A doctor with this email already exists' };
   }
+  // Emails are unique across every login, not just doctors.
+  if (password && (await User.exists({ email }))) {
+    return { error: 'An account with this email already exists' };
+  }
 
+  let userId: string | undefined;
   try {
+    if (password) {
+      // Password is hashed by the User schema's pre-save hook.
+      const user = await User.create({ name, email, phone: phone || undefined, password, role: 'doctor' });
+      userId = String(user._id);
+    }
     await Doctor.create({
+      user: userId,
       name,
       nameAr,
       specialty,
@@ -67,6 +85,8 @@ export async function createDoctor(
     });
   } catch (error) {
     console.error('Create doctor failed:', error);
+    // Don't leave a login behind for a profile that was never created.
+    if (userId) await User.deleteOne({ _id: userId }).catch(() => undefined);
     return { error: 'Could not create doctor. Please try again.' };
   }
 
@@ -105,6 +125,10 @@ export async function updateDoctor(
   if (clash) {
     return { error: 'Another doctor already uses this email' };
   }
+  const current = await Doctor.findById(id).select('user').lean();
+  if (await User.exists({ email, ...(current?.user ? { _id: { $ne: current.user } } : {}) })) {
+    return { error: 'Another account already uses this email' };
+  }
 
   
 try {
@@ -124,6 +148,14 @@ try {
   );
 
   if (!updated) return { error: 'Doctor not found' };
+
+  // Keep the doctor's login identity in step with their profile.
+  if (updated.user) {
+    await User.updateOne(
+      { _id: updated.user, role: 'doctor' },
+      { name, email, phone: phone || undefined }
+    );
+  }
 
   // Cancel future pending and confirmed appointments
   // when the doctor is inactive.
@@ -168,6 +200,7 @@ export async function deleteDoctor(id: string): Promise<DoctorFormState> {
   try {
     const deleted = await Doctor.findByIdAndDelete(id);
     if (!deleted) return { error: 'Doctor not found' };
+    if (deleted.user) await User.deleteOne({ _id: deleted.user, role: 'doctor' });
   } catch (error) {
     console.error('Delete doctor failed:', error);
     return { error: 'Could not delete doctor. Please try again.' };
@@ -212,6 +245,57 @@ export async function updateDoctorSchedule(
   } catch (error) {
     console.error('Update doctor schedule failed:', error);
     return { error: 'Could not save schedule. Please try again.' };
+  }
+
+  revalidatePath('/admin/doctors');
+  return { success: true };
+}
+
+/**
+ * Give a doctor a login, or reset the password of the one they have. The login
+ * uses the doctor's profile email; `role: 'doctor'` is set here only — public
+ * signup can never produce it.
+ */
+export async function setDoctorLogin(
+  _prev: DoctorFormState,
+  formData: FormData
+): Promise<DoctorFormState> {
+  await requireRole('admin');
+
+  const id = String(formData.get('id') ?? '');
+  const password = String(formData.get('password') ?? '');
+  if (!id) return { error: 'Missing doctor id' };
+  if (password.length < MIN_PASSWORD_LENGTH) {
+    return { error: `Password must be at least ${MIN_PASSWORD_LENGTH} characters` };
+  }
+
+  await connectDB();
+
+  const doctor = await Doctor.findById(id);
+  if (!doctor) return { error: 'Doctor not found' };
+
+  try {
+    const existing = doctor.user ? await User.findOne({ _id: doctor.user, role: 'doctor' }) : null;
+    if (existing) {
+      existing.password = password; // hashed by the pre-save hook
+      await existing.save();
+    } else {
+      if (await User.exists({ email: doctor.email })) {
+        return { error: 'An account with this email already exists' };
+      }
+      const user = await User.create({
+        name: doctor.name,
+        email: doctor.email,
+        phone: doctor.phone || undefined,
+        password,
+        role: 'doctor',
+      });
+      doctor.user = user._id;
+      await doctor.save();
+    }
+  } catch (error) {
+    console.error('Set doctor login failed:', error);
+    return { error: 'Could not save the login. Please try again.' };
   }
 
   revalidatePath('/admin/doctors');
