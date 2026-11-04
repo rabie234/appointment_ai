@@ -194,11 +194,17 @@ export async function rescheduleLeaveConflictAppointment(
         end.setUTCHours(0, 0, 0, 0)
         end.setUTCDate(end.getUTCDate() + 1)
 
-        const leave = await DoctorLeave.findOne({
-            doctor: appointment.doctor,
-            startDate: { $lt: end },
-            endDate: { $gt: start },
-        }).select("_id").lean()
+       const leave = await DoctorLeave.findOne({
+    doctor: appointment.doctor,
+    startDate: { $lt: end },
+    endDate: { $gt: start },
+    $or: [
+        { status: "approved" },
+        { status: { $exists: false } },
+    ],
+})
+    .select("_id")
+    .lean()
 
         if (leave) {
             return {
