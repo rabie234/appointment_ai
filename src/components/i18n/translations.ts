@@ -540,8 +540,7 @@ const translations = {
   "Leave request cancelled.": "تم إلغاء طلب الإجازة.",
   "This request overlaps an existing approved leave.": "يتداخل هذا الطلب مع إجازة موافَق عليها.",
   "Pending leave request not found.": "لم يتم العثور على طلب إجازة معلّق.",
-}
- as const;
+} as const;
 
 export function t(language: Language, text: string): string {
     if (language === "en") return text;
