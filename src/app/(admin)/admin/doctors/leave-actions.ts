@@ -16,9 +16,11 @@ export type LeaveActionState = {
 
 export async function createDoctorLeave(
   _prev: LeaveActionState,
-  formData: FormData
+  formData: FormData,
+  
+  
 ): Promise<LeaveActionState> {
-  await requireRole("admin");
+  const session = await requireRole("admin");
 
   const doctorId = String(formData.get("doctorId") ?? "").trim();
   const startStr = String(formData.get("startDate") ?? "").trim();
@@ -59,13 +61,31 @@ export async function createDoctorLeave(
 
   const exclusiveEnd = new Date(endDate);
   exclusiveEnd.setUTCDate(exclusiveEnd.getUTCDate() + 1);
+  const overlappingLeave = await DoctorLeave.exists({
+  doctor: doctor._id,
+  startDate: { $lt: exclusiveEnd },
+  endDate: { $gt: startDate },
+  $or: [
+    { status: { $in: ["pending", "approved"] } },
+    // Older Admin-created leave records have no status field.
+    { status: { $exists: false } },
+  ],
+})
 
+if (overlappingLeave) {
+  return {
+    error: "These dates overlap another pending or approved leave.",
+  }
+}
   try {
     await DoctorLeave.create({
   doctor: doctor._id,
   startDate,
   endDate: exclusiveEnd,
   reason: reason || undefined,
+  status: "approved",
+reviewedBy: session.user.id,
+reviewedAt: new Date(),
 });
 
     const affected = await Appointment.updateMany(
@@ -97,7 +117,7 @@ export async function createDoctorLeave(
 export async function cancelDoctorLeave(
   leaveId: string
 ): Promise<LeaveActionState> {
-  await requireRole("admin");
+  const session = await requireRole("admin");
   await connectDB();
 
   if (!/^[a-f\d]{24}$/i.test(leaveId)) {
@@ -114,7 +134,17 @@ export async function cancelDoctorLeave(
     const { doctor: doctorId, startDate, endDate } = leave;
 
     // Remove the leave record first.
-    await DoctorLeave.deleteOne({ _id: leave._id });
+    // Keep the record for history, but mark it cancelled.
+await DoctorLeave.updateOne(
+  { _id: leave._id },
+  {
+    $set: {
+      status: "cancelled",
+      reviewedBy: session.user.id,
+      reviewedAt: new Date(),
+    },
+  },
+);
 
     // Find appointments in this date range that are still covered
     // by another leave record for the same doctor.
@@ -129,11 +159,16 @@ export async function cancelDoctorLeave(
 
     for (const appointment of appointments) {
       const stillOnLeave = await DoctorLeave.exists({
-        doctor: doctorId,
-        startDate: { $lte: appointment.date },
-        endDate: { $gt: appointment.date },
-      });
-
+  _id: { $ne: leave._id },
+  doctor: doctorId,
+  startDate: { $lte: appointment.date },
+  endDate: { $gt: appointment.date },
+  $or: [
+    { status: "approved" },
+    // Older Admin-created leave records have no status field.
+    { status: { $exists: false } },
+  ],
+})
       if (!stillOnLeave) {
         await Appointment.updateOne(
           { _id: appointment._id },
@@ -153,4 +188,111 @@ export async function cancelDoctorLeave(
     console.error("Cancel doctor leave failed:", error);
     return { error: "Could not cancel leave. Please try again." };
   }
+}
+export async function approveDoctorLeave(
+  leaveId: string,
+  adminNote = "",
+): Promise<LeaveActionState> {
+  const session = await requireRole("admin");
+
+  if (!/^[a-f\d]{24}$/i.test(leaveId)) {
+    return { error: "Invalid leave record." };
+  }
+
+  await connectDB();
+
+  const leave = await DoctorLeave.findOne({
+    _id: leaveId,
+    status: "pending",
+  }).lean();
+
+  if (!leave) {
+    return { error: "Pending leave request not found." };
+  }
+
+  const overlap = await DoctorLeave.exists({
+    _id: { $ne: leave._id },
+    doctor: leave.doctor,
+    startDate: { $lt: leave.endDate },
+    endDate: { $gt: leave.startDate },
+    $or: [
+      { status: "approved" },
+      // Older Admin-created records have no status field; treat them as approved.
+      { status: { $exists: false } },
+    ],
+  });
+
+  if (overlap) {
+    return {
+      error: "This request overlaps an existing approved leave.",
+    };
+  }
+
+  const updated = await DoctorLeave.updateOne(
+    { _id: leave._id, status: "pending" },
+    {
+      $set: {
+        status: "approved",
+        reviewedBy: session.user.id,
+        reviewedAt: new Date(),
+        adminNote: adminNote.trim().slice(0, 500),
+      },
+    },
+  );
+
+  if (updated.modifiedCount === 0) {
+    return { error: "This request has already been reviewed." };
+  }
+
+  const affected = await Appointment.updateMany(
+    {
+      doctor: leave.doctor,
+      date: { $gte: leave.startDate, $lt: leave.endDate },
+      status: { $in: ["pending", "confirmed"] },
+    },
+    { $set: { leaveConflict: true } },
+  );
+
+  revalidatePath("/admin/doctor-leaves");
+  revalidatePath("/admin/doctors");
+  revalidatePath("/admin/appointments");
+  revalidatePath("/appointments");
+  revalidatePath("/patient/appointments");
+  revalidatePath("/doctor/account");
+
+  return { success: true, affectedCount: affected.modifiedCount };
+}
+
+export async function rejectDoctorLeave(
+  leaveId: string,
+  adminNote = "",
+): Promise<LeaveActionState> {
+  const session = await requireRole("admin");
+
+  if (!/^[a-f\d]{24}$/i.test(leaveId)) {
+    return { error: "Invalid leave record." };
+  }
+
+  await connectDB();
+
+  const result = await DoctorLeave.updateOne(
+    { _id: leaveId, status: "pending" },
+    {
+      $set: {
+        status: "rejected",
+        reviewedBy: session.user.id,
+        reviewedAt: new Date(),
+        adminNote: adminNote.trim().slice(0, 500),
+      },
+    },
+  );
+
+  if (result.modifiedCount === 0) {
+    return { error: "Pending leave request not found." };
+  }
+
+  revalidatePath("/admin/doctor-leaves");
+  revalidatePath("/doctor/account");
+
+  return { success: true };
 }

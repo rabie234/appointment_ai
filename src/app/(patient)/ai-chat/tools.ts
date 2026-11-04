@@ -1,5 +1,5 @@
 import { Type, type FunctionDeclaration } from "@google/genai";
-import { isValidObjectId } from "mongoose";
+import { isValidObjectId, Types } from "mongoose";
 import connectDB from "@/lib/mongodb";
 import { freeSlotsFor, parseDay } from "@/lib/slots-server";
 import { CONSULTATION_FEE } from "./chat-core";
@@ -111,20 +111,35 @@ export const functionDeclarations: FunctionDeclaration[] = [
       required: ["doctorId", "date", "time"],
     },
   },
-  {
-    name: "find_my_appointments",
-    description:
-      "Find the signed-in patient appointments with a doctor. Use when the patient wants to cancel an appointment. If the patient gives a doctor name, search for that doctor in the clinic first. If the doctor does not exist, report that clearly. If no doctor name is given, ask the patient for it. Never cancel an appointment with this tool.",
-    parameters: {
-      type: Type.OBJECT,
-      properties: {
-        doctorName: {
-          type: Type.STRING,
-          description: "Doctor name provided by the patient, if known.",
-        },
+  
+   {
+  name: "find_my_appointments",
+  description:
+    "Retrieve appointments belonging to the signed-in patient. " +
+    "Use upcoming by default. Patients can request specific statuses or history.",
+  parameters: {
+    type: Type.OBJECT,
+    properties: {
+      doctorName: {
+        type: Type.STRING,
+        description: "Optional doctor name or partial name.",
+      },
+      status: {
+        type: Type.STRING,
+        enum: [
+          "upcoming",
+          "confirmed",
+          "pending",
+          "cancelled",
+          "history",
+          "all",
+        ],
+        description:
+          "Use upcoming by default. Choose a specific filter when requested.",
       },
     },
   },
+},
   {
     name: "propose_cancellation",
     description:
@@ -217,51 +232,87 @@ async function getAvailableSlots(args: { doctorId?: string; date?: string }) {
   return { date, slots: result.slots ?? [] };
 }
 
+type AppointmentFilter =
+  | "upcoming"
+  | "confirmed"
+  | "pending"
+  | "cancelled"
+  | "history"
+  | "all";
+
 async function findMyAppointments(
   patientId: string,
-  args: { doctorName?: string },
+  args: {
+    doctorName?: string;
+    status?: AppointmentFilter;
+  }
 ) {
   const doctorName = String(args.doctorName ?? "").trim();
-  if (!doctorName) return { needsDoctorName: true };
+  const status = args.status ?? "upcoming";
 
   await connectDB();
 
-  const doctors = await Doctor.find({
-    status: "active",
-    name: { $regex: escapeRegExp(doctorName), $options: "i" },
-  })
-    .select("name specialty")
-    .lean();
+  let doctorIds: Types.ObjectId[] | undefined;
 
-  if (doctors.length === 0) {
-    return { doctorNotFound: true, requestedName: doctorName };
+  if (doctorName) {
+    const doctors = await Doctor.find({
+      name: { $regex: escapeRegExp(doctorName), $options: "i" },
+    })
+      .select("_id")
+      .lean();
+
+    if (doctors.length === 0) {
+      return { doctorNotFound: true, requestedName: doctorName };
+    }
+
+    doctorIds = doctors.map((doctor) => doctor._id);
   }
+
+  const statusFilters: Record<AppointmentFilter, string[]> = {
+    upcoming: ["pending", "confirmed", "in-progress"],
+    confirmed: ["confirmed"],
+    pending: ["pending"],
+    cancelled: ["cancelled"],
+    history: ["completed", "missed"],
+    all: [
+      "pending",
+      "confirmed",
+      "in-progress",
+      "completed",
+      "cancelled",
+      "missed",
+    ],
+  };
 
   const appointments = await Appointment.find({
     patient: patientId,
-    doctor: { $in: doctors.map((doctor) => doctor._id) },
-    status: { $in: ["pending", "confirmed"] },
-    date: { $gte: new Date(new Date().setHours(0, 0, 0, 0)) },
+    ...(doctorIds ? { doctor: { $in: doctorIds } } : {}),
+    status: { $in: statusFilters[status] },
   })
     .populate("doctor", "name specialty")
-    .sort({ date: 1, time: 1 })
+    .sort({ date: status === "all" || status === "history" || status === "cancelled" ? -1 : 1, time: 1 })
     .lean();
 
   return {
-    doctorFound: true,
-    appointments: appointments.map((appointment) => {
+    requestedStatus: status,
+    appointments: appointments.flatMap((appointment) => {
       const doctor = appointment.doctor as unknown as {
-        name: string;
-        specialty: string;
-      };
-      return {
+        name?: string;
+        specialty?: string;
+      } | null;
+
+      if (!doctor) return [];
+
+      return [{
         appointmentId: String(appointment._id),
-        doctorName: doctor.name,
-        specialty: doctor.specialty,
+        doctorName: doctor.name ?? "Unknown doctor",
+        specialty: doctor.specialty ?? "",
         date: new Date(appointment.date).toISOString().slice(0, 10),
         time: appointment.time,
         type: appointment.type,
-      };
+        status: appointment.status,
+        cancellationReason: appointment.cancellationReason ?? "",
+      }];
     }),
   };
 }
@@ -504,12 +555,30 @@ export async function runTool(
         ? { result: { booked: true }, confirmation: res.confirmation }
         : { result: res };
     }
-    case "find_my_appointments":
-      return {
-        result: await findMyAppointments(patientId, {
-          doctorName: String(args.doctorName ?? ""),
-        }),
-      };
+    case "find_my_appointments": {
+  const allowedStatuses: AppointmentFilter[] = [
+    "upcoming",
+    "confirmed",
+    "pending",
+    "cancelled",
+    "history",
+    "all",
+  ];
+
+  const requestedStatus = String(args.status ?? "upcoming");
+
+  const status: AppointmentFilter =
+    allowedStatuses.includes(requestedStatus as AppointmentFilter)
+      ? (requestedStatus as AppointmentFilter)
+      : "upcoming";
+
+  return {
+    result: await findMyAppointments(patientId, {
+      doctorName: String(args.doctorName ?? ""),
+      status,
+    }),
+  };
+}
     case "propose_cancellation": {
       const res = await proposeCancellation(patientId, {
         appointmentId: String(args.appointmentId ?? ""),

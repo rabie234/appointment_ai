@@ -1,194 +1,228 @@
-'use server';
+"use server"
 
-import { revalidatePath } from 'next/cache';
-import connectDB from '@/lib/mongodb';
-import { requireRole } from '@/lib/session';
+import { revalidatePath } from "next/cache"
+import connectDB from "@/lib/mongodb"
+import { requireRole } from "@/lib/session"
 import {
   availableSlots,
   isValidTime,
   normalizeWeek,
   slotsForDay,
   dayOfWeek,
-} from '@/lib/schedule';
-import Doctor from '@/models/Doctor';
-import Appointment from '@/models/Appointment';
-import DoctorLeave from '@/models/DoctorLeave';
-import { parseCalendarDate as parseDay } from '@/lib/date-validation'
-/** Parse a "YYYY-MM-DD" value into a UTC date at midnight. null if malformed. */
+} from "@/lib/schedule"
+import Doctor from "@/models/Doctor"
+import Appointment from "@/models/Appointment"
+import DoctorLeave from "@/models/DoctorLeave"
+import { parseCalendarDate as parseDay } from "@/lib/date-validation"
 
-/**
- * Parse a real calendar date in YYYY-MM-DD format.
- * Returns UTC midnight, or null if the date is invalid.
- */
-
-
-/** The [start, end) UTC bounds of the given day, for querying appointments. */
+/** The UTC start and exclusive end of a day. */
 function dayBounds(date: Date): { start: Date; end: Date } {
-  const start = new Date(date);
-  start.setUTCHours(0, 0, 0, 0);
-  const end = new Date(start);
-  end.setUTCDate(end.getUTCDate() + 1);
-  return { start, end };
+  const start = new Date(date)
+  start.setUTCHours(0, 0, 0, 0)
+
+  const end = new Date(start)
+  end.setUTCDate(end.getUTCDate() + 1)
+
+  return { start, end }
 }
 
-/** The "HH:MM" times already booked for a doctor on a given day (any active status). */
-async function bookedTimes(doctorId: string, date: Date): Promise<Set<string>> {
-  const { start, end } = dayBounds(date);
+/** Times already booked for a doctor on a day. */
+async function bookedTimes(
+  doctorId: string,
+  date: Date,
+): Promise<Set<string>> {
+  const { start, end } = dayBounds(date)
+
   const existing = await Appointment.find({
     doctor: doctorId,
     date: { $gte: start, $lt: end },
-    status: { $ne: 'cancelled' },
+    status: { $ne: "cancelled" },
   })
-    .select('time')
-    .lean();
-  return new Set(existing.map((a) => a.time));
+    .select("time")
+    .lean()
+
+  return new Set(existing.map((appointment) => appointment.time))
 }
+
+/** True only for approved leave and older records that have no status field. */
 async function isDoctorOnLeave(
   doctorId: string,
-  date: Date
+  date: Date,
 ): Promise<boolean> {
-  const { start, end } = dayBounds(date);
+  const { start, end } = dayBounds(date)
 
   const leave = await DoctorLeave.findOne({
     doctor: doctorId,
     startDate: { $lt: end },
     endDate: { $gt: start },
+    $or: [
+      { status: "approved" },
+      { status: { $exists: false } },
+    ],
   })
-    .select('_id')
-    .lean();
+    .select("_id")
+    .lean()
 
-  return Boolean(leave);
+  return Boolean(leave)
 }
 
 export type SlotsResult = {
-  slots?: string[];
-  error?: string;
-  onLeave?: boolean;
-};
+  slots?: string[]
+  error?: string
+  onLeave?: boolean
+}
+
 /**
- * Free slots for a doctor on a date. Read-only, but still requires a signed-in
- * patient — slot availability shouldn't leak to the public.
+ * Gets available slots for a date. A signed-in patient is required.
  */
 export async function getAvailableSlots(
   doctorId: string,
-  dateStr: string
+  dateStr: string,
 ): Promise<SlotsResult> {
-  await requireRole('patient');
+  await requireRole("patient")
 
-  const date = parseDay(dateStr);
-  if (!date) return { error: 'Invalid date' };
+  const date = parseDay(dateStr)
+  if (!date) return { error: "Invalid date" }
 
-  
-  await connectDB();
+  await connectDB()
 
-  const doctor = await Doctor.findById(doctorId).select('schedule status').lean();
-  if (!doctor) return { error: 'Doctor not found' };
-  if (doctor.status !== 'active') return { slots: [] };
+  const doctor = await Doctor.findById(doctorId)
+    .select("schedule status")
+    .lean()
+
+  if (!doctor) return { error: "Doctor not found" }
+  if (doctor.status !== "active") return { slots: [] }
+
   if (await isDoctorOnLeave(doctorId, date)) {
-  return { slots: [], onLeave: true };
-}
-  const schedule = normalizeWeek(doctor.schedule);
-  const taken = await bookedTimes(doctorId, date);
-  return { slots: availableSlots(schedule, date, taken) };
+    return { slots: [], onLeave: true }
+  }
+
+  const schedule = normalizeWeek(doctor.schedule)
+  const taken = await bookedTimes(doctorId, date)
+
+  return { slots: availableSlots(schedule, date, taken) }
 }
 
+/** Returns only dates covered by approved leave or older status-less records. */
 export async function getDoctorLeaveDates(
   doctorId: string,
-  dateStrings: string[]
+  dateStrings: string[],
 ): Promise<string[]> {
-  await requireRole("patient");
-  await connectDB();
+  await requireRole("patient")
+  await connectDB()
 
   const dates = dateStrings
     .map(parseDay)
-    .filter((date): date is Date => date !== null);
+    .filter((date): date is Date => date !== null)
 
-  if (dates.length === 0) return [];
+  if (dates.length === 0) return []
 
-  const firstDay = new Date(Math.min(...dates.map((d) => d.getTime())));
-  const lastDay = new Date(Math.max(...dates.map((d) => d.getTime())));
-  lastDay.setUTCDate(lastDay.getUTCDate() + 1);
+  const firstDay = new Date(
+    Math.min(...dates.map((date) => date.getTime())),
+  )
+  const lastDay = new Date(
+    Math.max(...dates.map((date) => date.getTime())),
+  )
+  lastDay.setUTCDate(lastDay.getUTCDate() + 1)
 
   const leaves = await DoctorLeave.find({
     doctor: doctorId,
     startDate: { $lt: lastDay },
     endDate: { $gt: firstDay },
+    $or: [
+      { status: "approved" },
+      { status: { $exists: false } },
+    ],
   })
     .select("startDate endDate")
-    .lean();
+    .lean()
 
   return dates
     .filter((date) =>
       leaves.some((leave) => {
-        const start = new Date(leave.startDate);
-        const end = new Date(leave.endDate);
-        start.setUTCHours(0, 0, 0, 0);
-        end.setUTCHours(0, 0, 0, 0);
-        return date >= start && date < end;
-      })
+        const start = new Date(leave.startDate)
+        const end = new Date(leave.endDate)
+
+        start.setUTCHours(0, 0, 0, 0)
+        end.setUTCHours(0, 0, 0, 0)
+
+        return date >= start && date < end
+      }),
     )
-    .map((date) => date.toISOString().slice(0, 10));
+    .map((date) => date.toISOString().slice(0, 10))
 }
 
+export type BookingState = {
+  error?: string
+  success?: boolean
+}
 
-export type BookingState = { error?: string; success?: boolean };
-
-const CONSULTATION_FEE = 120;
+const CONSULTATION_FEE = 120
 
 /**
- * Book an appointment. Everything the client sends is re-validated here: the
- * doctor exists and is active, the date/time falls inside the doctor's working
- * hours for that weekday, and the slot is still free. The final guard against a
- * double-book is the unique-ish (doctor, date, time) check right before create.
+ * Books an appointment after validating the doctor, date, schedule,
+ * approved leave, and current slot availability on the server.
  */
 export async function bookAppointment(
   _prev: BookingState,
-  formData: FormData
+  formData: FormData,
 ): Promise<BookingState> {
-  const session = await requireRole('patient');
+  const session = await requireRole("patient")
 
-  const doctorId = String(formData.get('doctorId') ?? '');
-  const dateStr = String(formData.get('date') ?? '');
-  const time = String(formData.get('time') ?? '');
-  const type = String(formData.get('type') ?? 'in-person');
+  const doctorId = String(formData.get("doctorId") ?? "")
+  const dateStr = String(formData.get("date") ?? "")
+  const time = String(formData.get("time") ?? "")
+  const type = String(formData.get("type") ?? "in-person")
 
   if (!doctorId || !dateStr || !time) {
-    return { error: 'Please choose a date and time' };
+    return { error: "Please choose a date and time" }
   }
 
-  const date = parseDay(dateStr);
-  if (!date) return { error: 'Invalid date' };
-  if (!isValidTime(time)) return { error: 'Invalid time' };
+  const date = parseDay(dateStr)
+  if (!date) return { error: "Invalid date" }
+  if (!isValidTime(time)) return { error: "Invalid time" }
 
-  // No booking in the past (compare at day granularity, UTC).
-  const today = new Date();
-  today.setUTCHours(0, 0, 0, 0);
-  if (date < today) return { error: 'That date has already passed' };
+  const today = new Date()
+  today.setUTCHours(0, 0, 0, 0)
 
-  const apptType = type === 'video' ? 'video' : 'in-person';
+  if (date < today) {
+    return { error: "That date has already passed" }
+  }
 
-  await connectDB();
+  const appointmentType = type === "video" ? "video" : "in-person"
 
-  const doctor = await Doctor.findById(doctorId).select('schedule status').lean();
-  if (!doctor) return { error: 'Doctor not found' };
-  if (doctor.status !== 'active') return { error: 'This doctor is not accepting appointments' };
+  await connectDB()
+
+  const doctor = await Doctor.findById(doctorId)
+    .select("schedule status")
+    .lean()
+
+  if (!doctor) return { error: "Doctor not found" }
+
+  if (doctor.status !== "active") {
+    return { error: "This doctor is not accepting appointments" }
+  }
+
   if (await isDoctorOnLeave(doctorId, date)) {
-  return {
-    error: 'The doctor is on leave on this date. Please choose another date.',
-  };
-}
-  // The requested time must be a real slot in the doctor's schedule for that day.
-  const schedule = normalizeWeek(doctor.schedule);
-  const day = dayOfWeek(date);
-  const entry = schedule.find((s) => s.day === day);
-  if (!entry || entry.closed || !slotsForDay(entry).includes(time)) {
-    return { error: 'The doctor is not available at that time' };
+    return {
+      error: "The doctor is on leave on this date. Please choose another date.",
+    }
   }
 
-  // Slot must still be free.
-  const taken = await bookedTimes(doctorId, date);
+  const schedule = normalizeWeek(doctor.schedule)
+  const day = dayOfWeek(date)
+  const entry = schedule.find((item) => item.day === day)
+
+  if (!entry || entry.closed || !slotsForDay(entry).includes(time)) {
+    return { error: "The doctor is not available at that time" }
+  }
+
+  const taken = await bookedTimes(doctorId, date)
+
   if (taken.has(time)) {
-    return { error: 'That slot was just taken. Please pick another time.' };
+    return {
+      error: "That slot was just taken. Please pick another time.",
+    }
   }
 
   try {
@@ -197,30 +231,29 @@ export async function bookAppointment(
       doctor: doctorId,
       date,
       time,
-      type: apptType,
-      status: 'pending',
+      type: appointmentType,
+      status: "pending",
       price: CONSULTATION_FEE,
-    });
-    
+    })
   } catch (error: unknown) {
     if (
-      typeof error === 'object' &&
+      typeof error === "object" &&
       error !== null &&
-      'code' in error &&
+      "code" in error &&
       error.code === 11000
     ) {
       return {
-        error: 'That slot was just taken. Please pick another time.',
-      };
+        error: "That slot was just taken. Please pick another time.",
+      }
     }
 
-    console.error('Book appointment failed:', error);
+    console.error("Book appointment failed:", error)
 
     return {
-      error: 'Could not book the appointment. Please try again.',
-    };
+      error: "Could not book the appointment. Please try again.",
+    }
   }
 
-  revalidatePath('/appointments');
-  return { success: true };
+  revalidatePath("/appointments")
+  return { success: true }
 }

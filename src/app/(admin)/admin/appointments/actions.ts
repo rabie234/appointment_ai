@@ -14,7 +14,7 @@ import Appointment from '@/models/Appointment';
 import Doctor from '@/models/Doctor';
 import { parseCalendarDate as parseDay } from '@/lib/date-validation'
 import { applyTransition, type NextStatus } from '@/lib/appointment-transitions';
-
+import DoctorLeave from "@/models/DoctorLeave"
 export type AppointmentActionState = { error?: string; success?: boolean };
 
 async function transition(id: string, next: NextStatus, cancellationReason?: string): Promise<AppointmentActionState> {
@@ -81,6 +81,27 @@ async function bookedTimes(doctorId: string, date: Date): Promise<Set<string>> {
     .lean();
   return new Set(existing.map((a) => a.time));
 }
+async function isDoctorOnLeave(
+  doctorId: string,
+  date: Date,
+): Promise<boolean> {
+  const { start, end } = dayBounds(date)
+
+  const leave = await DoctorLeave.findOne({
+    doctor: doctorId,
+    startDate: { $lt: end },
+    endDate: { $gt: start },
+    $or: [
+      { status: "approved" },
+      // Older Admin-created records have no status field.
+      { status: { $exists: false } },
+    ],
+  })
+    .select("_id")
+    .lean()
+
+  return Boolean(leave)
+}
 
 export type AdminSlotsResult = { slots?: string[]; error?: string };
 
@@ -90,10 +111,11 @@ export async function getDoctorSlots(
   dateStr: string
 ): Promise<AdminSlotsResult> {
   await requireRole('admin');
-
   const date = parseDay(dateStr);
   if (!date) return { error: 'Invalid date' };
-
+  if (await isDoctorOnLeave(doctorId, date)) {
+  return { slots: [] }
+}
   await connectDB();
 
   const doctor = await Doctor.findById(doctorId).select('schedule status').lean();
@@ -125,7 +147,7 @@ export async function adminCreateAppointment(
   if (!patientId || !doctorId || !dateStr || !time) {
     return { error: 'Patient, doctor, date and time are all required' };
   }
-
+  
   const date = parseDay(dateStr);
   if (!date) return { error: 'Invalid date' };
   if (!isValidTime(time)) return { error: 'Invalid time' };
@@ -139,7 +161,9 @@ export async function adminCreateAppointment(
   const doctor = await Doctor.findById(doctorId).select('schedule status').lean();
   if (!doctor) return { error: 'Doctor not found' };
   if (doctor.status !== 'active') return { error: 'This doctor is not accepting appointments' };
-
+  if (await isDoctorOnLeave(doctorId, date)) {
+  return { error: "The doctor is on leave on this date." }
+}
   const schedule = normalizeWeek(doctor.schedule);
   const entry = schedule.find((s) => s.day === dayOfWeek(date));
   if (!entry || entry.closed || !slotsForDay(entry).includes(time)) {

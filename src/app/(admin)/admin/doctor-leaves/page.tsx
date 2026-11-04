@@ -1,4 +1,3 @@
-
 import connectDB from "@/lib/mongodb"
 import { requireRole } from "@/lib/session"
 import DoctorLeave from "@/models/DoctorLeave"
@@ -16,13 +15,45 @@ export default async function DoctorLeavesPage() {
     await requireRole("admin")
     await connectDB()
 
-    const leaveDocs = await DoctorLeave.find()
+    const pendingDocs = await DoctorLeave.find({ status: "pending" })
+        .populate("doctor", "name nameAr specialty")
+        .sort({ createdAt: -1 })
+        .lean()
+
+    // Older Admin-created records have no status field; treat them as approved.
+    const leaveDocs = await DoctorLeave.find({
+        $or: [
+            { status: "approved" },
+            { status: { $exists: false } },
+        ],
+    })
         .populate("doctor", "name nameAr specialty")
         .sort({ startDate: -1 })
         .lean()
 
     const today = new Date()
     today.setUTCHours(0, 0, 0, 0)
+
+    const pendingRequests = pendingDocs.map((request) => {
+        const doctor = request.doctor as unknown as {
+            name?: string
+            nameAr?: string
+            specialty?: string
+        } | null
+
+        const endDate = new Date(request.endDate)
+        endDate.setUTCDate(endDate.getUTCDate() - 1)
+
+        return {
+            id: String(request._id),
+            doctorName: doctor?.name ?? "Deleted doctor",
+            doctorNameAr: doctor?.nameAr ?? doctor?.name ?? "Deleted doctor",
+            specialty: doctor?.specialty ?? "",
+            startDate: new Date(request.startDate).toISOString().slice(0, 10),
+            endDate: endDate.toISOString().slice(0, 10),
+            reason: request.reason ?? "",
+        }
+    })
 
     const leaves: DoctorLeaveRow[] = await Promise.all(
         leaveDocs.map(async (leave) => {
@@ -75,8 +106,7 @@ export default async function DoctorLeavesPage() {
 
                     return {
                         id: String(appointment._id),
-                        patientName:
-                            patient?.name ?? "Unknown patient",
+                        patientName: patient?.name ?? "Unknown patient",
                         patientEmail: patient?.email ?? "",
                         date: new Date(appointment.date)
                             .toISOString()
@@ -85,18 +115,14 @@ export default async function DoctorLeavesPage() {
                         status: appointment.status,
                         type: appointment.type,
                     }
-                }
+                },
             )
 
-            // Find the Arabic specialty name using the English name
-            // stored in the Doctor document.
             const specialtyName = doctor?.specialty ?? "—"
 
             const specialtyDoc =
                 specialtyName !== "—"
-                    ? await Specialty.findOne({
-                          name: specialtyName,
-                      })
+                    ? await Specialty.findOne({ name: specialtyName })
                           .select("name nameAr")
                           .lean()
                     : null
@@ -120,14 +146,17 @@ export default async function DoctorLeavesPage() {
                 affectedCount: affectedAppointments.length,
                 affectedAppointments,
             }
-        })
+        }),
     )
 
     return (
         <div className="space-y-6">
             <DoctorLeavesHeading />
 
-            <DoctorLeavesManager leaves={leaves} />
+            <DoctorLeavesManager
+                leaves={leaves}
+                pendingRequests={pendingRequests}
+            />
         </div>
     )
 }

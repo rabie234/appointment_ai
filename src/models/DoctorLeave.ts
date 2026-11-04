@@ -8,6 +8,10 @@ export interface IDoctorLeave extends Document {
   reason?: string;
   createdAt: Date;
   updatedAt: Date;
+  status: "pending" | "approved" | "rejected" | "cancelled";
+  reviewedBy?: mongoose.Types.ObjectId;
+  reviewedAt?: Date;
+  adminNote?: string;
 }
 
 const DoctorLeaveSchema = new Schema<IDoctorLeave>(
@@ -30,10 +34,29 @@ const DoctorLeaveSchema = new Schema<IDoctorLeave>(
       type: String,
       trim: true,
     },
+        status: {
+      type: String,
+      enum: ["pending", "approved", "rejected", "cancelled"],
+      default: "pending",
+      required: true,
+      index: true,
+    },
+    reviewedBy: {
+      type: Schema.Types.ObjectId,
+      ref: "User",
+    },
+    reviewedAt: {
+      type: Date,
+    },
+    adminNote: {
+      type: String,
+      trim: true,
+    },
   },
   {
     timestamps: true,
   }
+  
 );
 
 DoctorLeaveSchema.index({ doctor: 1, startDate: 1, endDate: 1 });

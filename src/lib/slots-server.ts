@@ -2,7 +2,7 @@ import connectDB from '@/lib/mongodb';
 import { availableSlots, normalizeWeek, type DayHours } from '@/lib/schedule';
 import Doctor from '@/models/Doctor';
 import Appointment from '@/models/Appointment';
-
+import DoctorLeave from "@/models/DoctorLeave"
 /**
  * Server-side slot helpers shared by the patient booking flow, the admin
  * appointment creator, and the AI assistant tools — so the "what's free?" logic
@@ -57,7 +57,20 @@ export async function freeSlotsFor(
   const doctor = await Doctor.findById(doctorId).select('schedule status').lean();
   if (!doctor) return { error: 'Doctor not found' };
   if (doctor.status !== 'active') return { slots: [] };
+  const { start, end } = dayBounds(date)
 
+const leave = await DoctorLeave.exists({
+  doctor: doctorId,
+  startDate: { $lt: end },
+  endDate: { $gt: start },
+  $or: [
+    { status: "approved" },
+    // Older Admin-created leaves have no status field.
+    { status: { $exists: false } },
+  ],
+})
+
+if (leave) return { slots: [] }
   const schedule: DayHours[] = normalizeWeek(doctor.schedule);
   const taken = await bookedTimes(doctorId, date);
   return { slots: availableSlots(schedule, date, taken) };

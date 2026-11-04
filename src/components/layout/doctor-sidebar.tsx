@@ -51,11 +51,6 @@ export function DoctorSidebar() {
                     )
                 })}
             </nav>
-
-            <div className="p-4 border-t space-y-3">
-                <LanguageSwitcher />
-                <LogoutButton className="w-full px-3 py-2.5 rounded-xl" />
-            </div>
         </aside>
     )
 }
