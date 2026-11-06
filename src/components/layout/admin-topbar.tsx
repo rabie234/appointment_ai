@@ -7,6 +7,7 @@ import { useRouter } from "next/navigation"
 import { Input } from "@/components/ui/input"
 import { useLanguage } from "@/components/i18n/language-provider"
 import { t } from "@/components/i18n/translations"
+import { NotificationsBell } from "./notifications-bell"
 import { LanguageSwitcher } from "@/components/i18n/language-switcher"
 import { LogoutButton } from "./logout-button"
 import {
@@ -250,6 +251,8 @@ export function AdminTopbar({
                     )}
                 </div>
             </div>
+
+            <NotificationsBell />
 
             {/* Admin profile dropdown */}
             <div className="relative" ref={dropdownRef}>

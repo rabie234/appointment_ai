@@ -19,6 +19,7 @@ import { cn } from "@/lib/utils"
 import { LanguageSwitcher } from "@/components/i18n/language-switcher"
 import { useLanguage } from "@/components/i18n/language-provider"
 import { t } from "@/components/i18n/translations"
+import { NotificationsBell } from "./notifications-bell"
 
 const navItems = [
     { name: "Home", href: "/", icon: Home },
@@ -114,6 +115,10 @@ export function PatientNavbar({ user }: { user: Session["user"] }) {
                         })}
                     </div>
 
+                    <div className="hidden md:block">
+                        <NotificationsBell />
+                    </div>
+
                     {/* Profile (desktop) */}
                     <div
                         className="hidden md:block relative"
@@ -159,6 +164,10 @@ export function PatientNavbar({ user }: { user: Session["user"] }) {
                                 <LogoutButton className="w-full px-3 py-2.5" />
                             </div>
                         )}
+                    </div>
+
+                    <div className="md:hidden">
+                        <NotificationsBell />
                     </div>
 
                     {/* Mobile toggle */}

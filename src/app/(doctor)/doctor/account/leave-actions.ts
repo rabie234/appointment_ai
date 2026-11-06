@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 import connectDB from "@/lib/mongodb";
 import { requireDoctor } from "@/lib/doctor-session";
 import DoctorLeave from "@/models/DoctorLeave";
+import { notifyAdmins } from "@/lib/notification-service";
 
 export type LeaveRequestState = {
   error?: string;
@@ -76,6 +77,14 @@ export async function requestMyLeave(
     console.error("Submit doctor leave request failed:", error);
     return { error: "Could not submit your leave request. Please try again." };
   }
+  await notifyAdmins({
+    category: "leave",
+    titleKey: "Notification: New doctor leave request",
+    bodyKey: "Notification body: A doctor submitted leave dates for review.",
+    href: "/admin/doctor-leaves",
+    context: startStr + " – " + endStr,
+  });
+
   revalidatePath("/admin/doctor-leaves");
   revalidatePath("/doctor/leaves")
 
@@ -113,6 +122,13 @@ export async function cancelMyLeaveRequest(
         error: "Pending leave request not found. It may already have been reviewed.",
       }
     }
+    await notifyAdmins({
+      category: "leave",
+      titleKey: "Notification: Doctor cancelled leave request",
+      bodyKey: "Notification body: A doctor cancelled a pending leave request.",
+      href: "/admin/doctor-leaves",
+    })
+
     revalidatePath("/admin/doctor-leaves")
     revalidatePath("/doctor/leaves")
 

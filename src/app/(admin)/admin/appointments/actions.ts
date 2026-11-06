@@ -14,6 +14,7 @@ import Appointment from "@/models/Appointment"
 import Doctor from "@/models/Doctor"
 import DoctorLeave from "@/models/DoctorLeave"
 import { parseCalendarDate as parseDay } from "@/lib/date-validation"
+import { notifyAppointmentParties } from "@/lib/notification-service"
 import {
   applyTransition,
   type NextStatus,
@@ -34,6 +35,57 @@ async function transition(
   const result = await applyTransition({ id, next, cancellationReason })
 
   if (result.success) {
+    const events = {
+      confirmed: {
+        patientTitle: "Notification: Appointment confirmed",
+        patientBody: "Notification body: Your appointment has been confirmed.",
+        doctorTitle: "Notification: Appointment confirmed",
+        doctorBody: "Notification body: A confirmed appointment was added to your schedule.",
+      },
+      cancelled: {
+        patientTitle: "Notification: Appointment cancelled",
+        patientBody: "Notification body: Your appointment was cancelled by the clinic.",
+        doctorTitle: "Notification: Appointment cancelled",
+        doctorBody: "Notification body: An appointment on your schedule was cancelled.",
+      },
+      "in-progress": {
+        patientTitle: "Notification: Visit started",
+        patientBody: "Notification body: Your visit has started.",
+        doctorTitle: "Notification: Visit started",
+        doctorBody: "Notification body: A visit on your schedule has started.",
+      },
+      completed: {
+        patientTitle: "Notification: Visit completed",
+        patientBody: "Notification body: Your appointment was marked as completed.",
+        doctorTitle: "Notification: Visit completed",
+        doctorBody: "Notification body: An appointment was marked complete.",
+      },
+      missed: {
+        patientTitle: "Notification: Appointment marked missed",
+        patientBody: "Notification body: Your appointment was marked as missed.",
+        doctorTitle: "Notification: Appointment marked missed",
+        doctorBody: "Notification body: An appointment was marked as missed.",
+      },
+    } as const
+    const event = events[next as keyof typeof events]
+    if (event) {
+      await notifyAppointmentParties(
+        id,
+        {
+          category: "appointment",
+          titleKey: event.patientTitle,
+          bodyKey: event.patientBody,
+          href: "/appointments",
+        },
+        {
+          category: "appointment",
+          titleKey: event.doctorTitle,
+          bodyKey: event.doctorBody,
+          href: "/doctor/appointments",
+        }
+      )
+    }
+
     revalidatePath("/appointments")
     revalidatePath("/admin/appointments")
     revalidatePath("/doctor/appointments")
@@ -223,8 +275,9 @@ export async function adminCreateAppointment(
     }
   }
 
+  let appointmentId = ""
   try {
-    await Appointment.create({
+    const appointment = await Appointment.create({
       patient: patientId,
       doctor: doctorId,
       date,
@@ -234,12 +287,29 @@ export async function adminCreateAppointment(
       status: "confirmed",
       price: CONSULTATION_FEE,
     })
+    appointmentId = String(appointment._id)
   } catch (error) {
     console.error("Admin create appointment failed:", error)
     return {
       error: "Could not create the appointment. Please try again.",
     }
   }
+
+  await notifyAppointmentParties(
+    appointmentId,
+    {
+      category: "appointment",
+      titleKey: "Notification: Appointment confirmed",
+      bodyKey: "Notification body: Your appointment has been confirmed.",
+      href: "/appointments",
+    },
+    {
+      category: "appointment",
+      titleKey: "Notification: Appointment confirmed",
+      bodyKey: "Notification body: A confirmed appointment was added to your schedule.",
+      href: "/doctor/appointments",
+    }
+  )
 
   revalidatePath("/admin/appointments")
   return { success: true }

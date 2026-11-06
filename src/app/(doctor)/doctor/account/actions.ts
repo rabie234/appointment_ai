@@ -7,6 +7,7 @@ import { getClinicHours } from '@/lib/clinic-hours';
 import { validateAgainstClinic, validateWeek, weekFromFormData } from '@/lib/schedule';
 import User from '@/models/User';
 import DoctorScheduleRequest from "@/models/DoctorScheduleRequest"
+import { notifyAdmins } from "@/lib/notification-service"
 export type AccountFormState = { error?: string; success?: string };
 
 const MIN_PASSWORD_LENGTH = 6;
@@ -105,6 +106,13 @@ export async function requestMyScheduleChange(
       error: "Could not submit your schedule-change request. Please try again.",
     }
   }
+
+  await notifyAdmins({
+    category: "schedule",
+    titleKey: "Notification: New working-hours request",
+    bodyKey: "Notification body: A doctor submitted a working-hours change for review.",
+    href: "/admin/schedule-requests",
+  })
 
   revalidatePath("/doctor/account")
   revalidatePath("/doctor/working-hours")

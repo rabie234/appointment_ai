@@ -8,6 +8,7 @@ import Appointment from "@/models/Appointment"
 import Doctor from "@/models/Doctor"
 import DoctorLeave from "@/models/DoctorLeave"
 import DoctorScheduleRequest from "@/models/DoctorScheduleRequest"
+import { notifyAdmins, notifyDoctor } from "@/lib/notification-service"
 import {
     dayOfWeek,
     isValidTime,
@@ -52,6 +53,27 @@ export async function cancelPendingAppointment(appointmentId: string) {
                 message: "Appointment cannot be cancelled",
             }
         }
+
+        const context =
+            new Date(appointment.date).toISOString().slice(0, 10) +
+            " · " +
+            appointment.time
+        await Promise.all([
+            notifyDoctor(String(appointment.doctor), {
+                category: "appointment",
+                titleKey: "Notification: Patient cancelled appointment",
+                bodyKey: "Notification body: A patient cancelled an appointment on your schedule.",
+                href: "/doctor/appointments",
+                context,
+            }),
+            notifyAdmins({
+                category: "appointment",
+                titleKey: "Notification: Patient cancelled appointment",
+                bodyKey: "Notification body: A patient cancelled an appointment.",
+                href: "/admin/appointments",
+                context,
+            }),
+        ])
 
         revalidatePath("/appointments")
         revalidatePath("/admin/schedule-requests")
@@ -121,6 +143,27 @@ export async function cancelLeaveConflictAppointment(
                     "This appointment cannot be cancelled or no longer needs attention.",
             }
         }
+
+        const context =
+            new Date(appointment.date).toISOString().slice(0, 10) +
+            " · " +
+            appointment.time
+        await Promise.all([
+            notifyDoctor(String(appointment.doctor), {
+                category: "appointment",
+                titleKey: "Notification: Patient cancelled appointment",
+                bodyKey: "Notification body: A patient cancelled an appointment on your schedule.",
+                href: "/doctor/appointments",
+                context,
+            }),
+            notifyAdmins({
+                category: "appointment",
+                titleKey: "Notification: Patient cancelled appointment",
+                bodyKey: "Notification body: A patient cancelled an appointment.",
+                href: "/admin/appointments",
+                context,
+            }),
+        ])
 
         revalidatePath("/appointments")
         revalidatePath("/admin/schedule-requests")
@@ -297,6 +340,24 @@ export async function rescheduleLeaveConflictAppointment(
         appointment.leaveConflict = false
         appointment.scheduleChangeRequestId = undefined
         await appointment.save()
+
+        const context = dateStr + " · " + time
+        await Promise.all([
+            notifyDoctor(String(appointment.doctor), {
+                category: "appointment",
+                titleKey: "Notification: Appointment rescheduled by patient",
+                bodyKey: "Notification body: A patient selected a new time for an appointment.",
+                href: "/doctor/appointments",
+                context,
+            }),
+            notifyAdmins({
+                category: "appointment",
+                titleKey: "Notification: Appointment rescheduled by patient",
+                bodyKey: "Notification body: A patient resolved an appointment conflict.",
+                href: "/admin/schedule-requests",
+                context,
+            }),
+        ])
 
         revalidatePath("/appointments")
         revalidatePath("/admin/appointments")

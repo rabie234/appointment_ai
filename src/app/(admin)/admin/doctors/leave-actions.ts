@@ -7,6 +7,7 @@ import { requireRole } from "@/lib/session";
 import Doctor from "@/models/Doctor";
 import DoctorLeave from "@/models/DoctorLeave";
 import Appointment from "@/models/Appointment";
+import { notifyDoctor, notifyPatientsAffectedByLeave, notifyUser } from "@/lib/notification-service";
 
 export type LeaveActionState = {
   error?: string;
@@ -99,6 +100,17 @@ reviewedAt: new Date(),
       }
     );
 
+    await Promise.all([
+      notifyDoctor(String(doctor._id), {
+        category: "leave",
+        titleKey: "Notification: Leave scheduled by clinic",
+        bodyKey: "Notification body: The clinic scheduled an approved leave period for you.",
+        href: "/doctor/leaves",
+        context: startStr + " – " + endStr,
+      }),
+      notifyPatientsAffectedByLeave(String(doctor._id), startDate, exclusiveEnd),
+    ]);
+
     revalidatePath("/admin/doctors");
     revalidatePath("/admin/appointments");
     revalidatePath("/appointments");
@@ -154,7 +166,7 @@ await DoctorLeave.updateOne(
       leaveConflict: true,
       status: { $in: ["pending", "confirmed"] },
     })
-      .select("_id date")
+      .select("_id patient date time")
       .lean();
 
     for (const appointment of appointments) {
@@ -174,8 +186,25 @@ await DoctorLeave.updateOne(
           { _id: appointment._id },
           { $set: { leaveConflict: false } }
         );
+        await notifyUser(String(appointment.patient), {
+          category: "appointment",
+          titleKey: "Notification: Appointment no longer affected by leave",
+          bodyKey: "Notification body: The leave affecting your appointment was cancelled. Your booking remains active.",
+          href: "/appointments",
+          context:
+            new Date(appointment.date).toISOString().slice(0, 10) +
+            " · " +
+            appointment.time,
+        });
       }
     }
+
+    await notifyDoctor(String(doctorId), {
+      category: "leave",
+      titleKey: "Notification: Doctor leave cancelled",
+      bodyKey: "Notification body: An approved leave period was cancelled by the clinic.",
+      href: "/doctor/leaves",
+    });
 
     revalidatePath("/admin/doctor-leaves");
     revalidatePath("/admin/doctors");
@@ -253,6 +282,16 @@ export async function approveDoctorLeave(
     { $set: { leaveConflict: true } },
   );
 
+  await Promise.all([
+    notifyDoctor(String(leave.doctor), {
+      category: "leave",
+      titleKey: "Notification: Doctor leave approved",
+      bodyKey: "Notification body: Your leave request was approved.",
+      href: "/doctor/leaves",
+    }),
+    notifyPatientsAffectedByLeave(String(leave.doctor), leave.startDate, leave.endDate),
+  ]);
+
   revalidatePath("/admin/doctor-leaves");
   revalidatePath("/admin/doctors");
   revalidatePath("/admin/appointments");
@@ -275,6 +314,15 @@ export async function rejectDoctorLeave(
 
   await connectDB();
 
+  const leave = await DoctorLeave.findOne({
+    _id: leaveId,
+    status: "pending",
+  }).select("doctor").lean();
+
+  if (!leave) {
+    return { error: "Pending leave request not found." };
+  }
+
   const result = await DoctorLeave.updateOne(
     { _id: leaveId, status: "pending" },
     {
@@ -290,6 +338,13 @@ export async function rejectDoctorLeave(
   if (result.modifiedCount === 0) {
     return { error: "Pending leave request not found." };
   }
+
+  await notifyDoctor(String(leave.doctor), {
+    category: "leave",
+    titleKey: "Notification: Doctor leave rejected",
+    bodyKey: "Notification body: Your leave request was rejected.",
+    href: "/doctor/leaves",
+  });
 
   revalidatePath("/admin/doctor-leaves");
   revalidatePath("/doctor/account");

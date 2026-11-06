@@ -17,6 +17,7 @@ import {
     validateWeek,
 } from "@/lib/schedule"
 import { appointmentHasPassed } from "@/lib/appointment-transitions"
+import { notifyDoctor, notifyUser } from "@/lib/notification-service"
 
 type ScheduleReviewResult = {
     error?: string
@@ -173,6 +174,13 @@ export async function approveScheduleChange(
         { $unset: { scheduleChangeRequestId: "" } }
     )
 
+    await notifyDoctor(String(doctor._id), {
+        category: "schedule",
+        titleKey: "Notification: Working-hours change approved",
+        bodyKey: "Notification body: Your requested working hours were approved.",
+        href: "/doctor/working-hours",
+    })
+
     revalidateSchedulePages()
     return { success: true }
 }
@@ -188,6 +196,15 @@ export async function rejectScheduleChange(
     }
 
     await connectDB()
+
+    const request = await DoctorScheduleRequest.findOne({
+        _id: requestId,
+        status: "pending",
+    }).select("doctor").lean()
+
+    if (!request) {
+        return { error: "Pending schedule request not found." }
+    }
 
     const result = await DoctorScheduleRequest.updateOne(
         { _id: requestId, status: "pending" },
@@ -209,6 +226,13 @@ export async function rejectScheduleChange(
         { scheduleChangeRequestId: requestId },
         { $unset: { scheduleChangeRequestId: "" } }
     )
+
+    await notifyDoctor(String(request.doctor), {
+        category: "schedule",
+        titleKey: "Notification: Working-hours change rejected",
+        bodyKey: "Notification body: Your requested working-hours change was rejected.",
+        href: "/doctor/working-hours",
+    })
 
     revalidateSchedulePages()
     return { success: true }
@@ -246,7 +270,7 @@ export async function requestPatientReschedule(
         date: { $gte: today },
         status: { $in: ["pending", "confirmed"] },
     })
-        .select("date time scheduleChangeRequestId")
+        .select("patient date time scheduleChangeRequestId")
         .lean()
 
     if (
@@ -313,6 +337,14 @@ export async function requestPatientReschedule(
             error: "This appointment already has a reschedule request.",
         }
     }
+
+    await notifyUser(String(appointment.patient), {
+        category: "appointment",
+        titleKey: "Notification: Choose a new time for your appointment",
+        bodyKey: "Notification body: Your doctor requested a working-hours change that affects your appointment. Please choose a new time.",
+        href: "/appointments",
+        context: new Date(appointment.date).toISOString().slice(0, 10) + " · " + appointment.time,
+    })
 
     revalidatePath("/appointments")
     revalidatePath("/admin/schedule-requests")

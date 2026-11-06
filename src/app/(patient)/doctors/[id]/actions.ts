@@ -16,6 +16,7 @@ import DoctorLeave from "@/models/DoctorLeave"
 import { parseCalendarDate as parseDay } from "@/lib/date-validation"
 import mongoose from "mongoose"
 import DoctorScheduleRequest from "@/models/DoctorScheduleRequest"
+import { notifyAdmins, notifyUser } from "@/lib/notification-service"
 /** The UTC start and exclusive end of a day. */
 function dayBounds(date: Date): { start: Date; end: Date } {
   const start = new Date(date)
@@ -296,6 +297,24 @@ export async function bookAppointment(
       error: "Could not book the appointment. Please try again.",
     }
   }
+
+  const context = dateStr + " · " + time
+  await Promise.all([
+    notifyUser(session.user.id, {
+      category: "appointment",
+      titleKey: "Notification: Appointment request received",
+      bodyKey: "Notification body: The clinic received your appointment request.",
+      href: "/appointments",
+      context,
+    }),
+    notifyAdmins({
+      category: "appointment",
+      titleKey: "Notification: New appointment request",
+      bodyKey: "Notification body: A patient submitted an appointment request that needs confirmation.",
+      href: "/admin/appointments",
+      context,
+    }),
+  ])
 
   revalidatePath("/appointments")
   return { success: true }
