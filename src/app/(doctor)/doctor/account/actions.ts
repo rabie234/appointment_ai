@@ -6,7 +6,7 @@ import { requireDoctor } from '@/lib/doctor-session';
 import { getClinicHours } from '@/lib/clinic-hours';
 import { validateAgainstClinic, validateWeek, weekFromFormData } from '@/lib/schedule';
 import User from '@/models/User';
-
+import DoctorScheduleRequest from "@/models/DoctorScheduleRequest"
 export type AccountFormState = { error?: string; success?: string };
 
 const MIN_PASSWORD_LENGTH = 6;
@@ -57,55 +57,63 @@ export async function updateMyProfile(
   return { success: 'Profile saved.' };
 }
 
-/** Show yourself to patients as on leave, or as available again. */
-export async function updateMyAvailability(
-  _prev: AccountFormState,
-  formData: FormData
-): Promise<AccountFormState> {
-  const { doctor } = await requireDoctor();
-  if (!doctor) return NO_PROFILE;
-
-  const availability = String(formData.get('availability') ?? '') === 'on-leave' ? 'on-leave' : 'available';
-
-  try {
-    doctor.availability = availability;
-    await doctor.save();
-  } catch (error) {
-    console.error('Update doctor availability failed:', error);
-    return { error: 'Could not update your availability. Please try again.' };
-  }
-
-  refresh();
-  return { success: availability === 'on-leave' ? 'You are now shown as on leave.' : 'You are now shown as available.' };
-}
 
 /** Weekly hours, validated on their own and then bounded by the clinic's hours. */
-export async function updateMySchedule(
+export async function requestMyScheduleChange(
   _prev: AccountFormState,
   formData: FormData
 ): Promise<AccountFormState> {
-  const { doctor } = await requireDoctor();
-  if (!doctor) return NO_PROFILE;
+  const { doctor } = await requireDoctor()
+  if (!doctor) return NO_PROFILE
 
-  const week = weekFromFormData(formData, 'doctor');
-  const shape = validateWeek(week);
-  if (!shape.ok) return { error: shape.error };
+  const week = weekFromFormData(formData, "doctor")
+  const shape = validateWeek(week)
+  if (!shape.ok) return { error: shape.error }
 
-  const bounded = validateAgainstClinic(week, await getClinicHours());
-  if (!bounded.ok) return { error: bounded.error };
+  const bounded = validateAgainstClinic(week, await getClinicHours())
+  if (!bounded.ok) return { error: bounded.error }
 
-  try {
-    doctor.schedule = week;
-    await doctor.save();
-  } catch (error) {
-    console.error('Update doctor schedule failed:', error);
-    return { error: 'Could not save your working hours. Please try again.' };
+  await connectDB()
+
+  const alreadyPending = await DoctorScheduleRequest.exists({
+    doctor: doctor._id,
+    status: "pending",
+  })
+
+  if (alreadyPending) {
+    return { error: "You already have a pending schedule-change request." }
   }
 
-  refresh();
-  return { success: 'Working hours saved.' };
-}
+  try {
+    await DoctorScheduleRequest.create({
+      doctor: doctor._id,
+      requestedSchedule: week,
+      status: "pending",
+    })
+  } catch (error) {
+    if (
+      typeof error === "object" &&
+      error !== null &&
+      "code" in error &&
+      error.code === 11000
+    ) {
+      return { error: "You already have a pending schedule-change request." }
+    }
 
+    console.error("Submit doctor schedule-change request failed:", error)
+    return {
+      error: "Could not submit your schedule-change request. Please try again.",
+    }
+  }
+
+  revalidatePath("/doctor/account")
+  revalidatePath("/doctor/working-hours")
+  revalidatePath("/admin/schedule-requests")
+
+  return {
+    success: "Schedule-change request submitted for admin approval.",
+  }
+}
 export async function changeMyPassword(
   _prev: AccountFormState,
   formData: FormData

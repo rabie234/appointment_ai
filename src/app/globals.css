@@ -1,5 +1,6 @@
 @import "tailwindcss";
 @import "tw-animate-css";
+/* @import "shadcn/tailwind.css"; */
 @import "shadcn/tailwind.css";
 
 /* `dark:` utilities follow the same `.dark` switch as the theme tokens below.

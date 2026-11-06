@@ -19,7 +19,10 @@ export default async function DoctorLeavesPage() {
         .populate("doctor", "name nameAr specialty")
         .sort({ createdAt: -1 })
         .lean()
-
+    const rejectedDocs = await DoctorLeave.find({ status: "rejected" })
+    .populate("doctor", "name nameAr specialty")
+    .sort({ reviewedAt: -1 })
+    .lean()
     // Older Admin-created records have no status field; treat them as approved.
     const leaveDocs = await DoctorLeave.find({
         $or: [
@@ -35,25 +38,47 @@ export default async function DoctorLeavesPage() {
     today.setUTCHours(0, 0, 0, 0)
 
     const pendingRequests = pendingDocs.map((request) => {
-        const doctor = request.doctor as unknown as {
-            name?: string
-            nameAr?: string
-            specialty?: string
-        } | null
+    const doctor = request.doctor as unknown as {
+        name?: string
+        nameAr?: string
+        specialty?: string
+    } | null
 
-        const endDate = new Date(request.endDate)
-        endDate.setUTCDate(endDate.getUTCDate() - 1)
+    const endDate = new Date(request.endDate)
+    endDate.setUTCDate(endDate.getUTCDate() - 1)
 
-        return {
-            id: String(request._id),
-            doctorName: doctor?.name ?? "Deleted doctor",
-            doctorNameAr: doctor?.nameAr ?? doctor?.name ?? "Deleted doctor",
-            specialty: doctor?.specialty ?? "",
-            startDate: new Date(request.startDate).toISOString().slice(0, 10),
-            endDate: endDate.toISOString().slice(0, 10),
-            reason: request.reason ?? "",
-        }
-    })
+    return {
+        id: String(request._id),
+        doctorName: doctor?.name ?? "Deleted doctor",
+        doctorNameAr: doctor?.nameAr ?? doctor?.name ?? "Deleted doctor",
+        specialty: doctor?.specialty ?? "",
+        startDate: new Date(request.startDate).toISOString().slice(0, 10),
+        endDate: endDate.toISOString().slice(0, 10),
+        reason: request.reason ?? "",
+    }
+})
+
+const rejectedRequests = rejectedDocs.map((request) => {
+    const doctor = request.doctor as unknown as {
+        name?: string
+        nameAr?: string
+        specialty?: string
+    } | null
+
+    const endDate = new Date(request.endDate)
+    endDate.setUTCDate(endDate.getUTCDate() - 1)
+
+    return {
+        id: String(request._id),
+        doctorName: doctor?.name ?? "Deleted doctor",
+        doctorNameAr: doctor?.nameAr ?? doctor?.name ?? "Deleted doctor",
+        specialty: doctor?.specialty ?? "",
+        startDate: new Date(request.startDate).toISOString().slice(0, 10),
+        endDate: endDate.toISOString().slice(0, 10),
+        reason: request.reason ?? "",
+        adminNote: request.adminNote ?? "",
+    }
+})
 
     const leaves: DoctorLeaveRow[] = await Promise.all(
         leaveDocs.map(async (leave) => {
@@ -156,6 +181,7 @@ export default async function DoctorLeavesPage() {
             <DoctorLeavesManager
                 leaves={leaves}
                 pendingRequests={pendingRequests}
+                rejectedRequests={rejectedRequests}
             />
         </div>
     )

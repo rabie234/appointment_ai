@@ -76,9 +76,8 @@ export async function requestMyLeave(
     console.error("Submit doctor leave request failed:", error);
     return { error: "Could not submit your leave request. Please try again." };
   }
-
-  revalidatePath("/doctor/account");
   revalidatePath("/admin/doctor-leaves");
+  revalidatePath("/doctor/leaves")
 
   return { success: "Leave request submitted for administrator approval." };
 }
@@ -114,9 +113,8 @@ export async function cancelMyLeaveRequest(
         error: "Pending leave request not found. It may already have been reviewed.",
       }
     }
-
-    revalidatePath("/doctor/account")
     revalidatePath("/admin/doctor-leaves")
+    revalidatePath("/doctor/leaves")
 
     return { success: "Leave request cancelled." }
   } catch (error) {

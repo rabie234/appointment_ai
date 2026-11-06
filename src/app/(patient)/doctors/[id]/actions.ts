@@ -14,7 +14,8 @@ import Doctor from "@/models/Doctor"
 import Appointment from "@/models/Appointment"
 import DoctorLeave from "@/models/DoctorLeave"
 import { parseCalendarDate as parseDay } from "@/lib/date-validation"
-
+import mongoose from "mongoose"
+import DoctorScheduleRequest from "@/models/DoctorScheduleRequest"
 /** The UTC start and exclusive end of a day. */
 function dayBounds(date: Date): { start: Date; end: Date } {
   const start = new Date(date)
@@ -78,8 +79,9 @@ export type SlotsResult = {
 export async function getAvailableSlots(
   doctorId: string,
   dateStr: string,
+  appointmentId?: string
 ): Promise<SlotsResult> {
-  await requireRole("patient")
+  const session = await requireRole("patient")
 
   const date = parseDay(dateStr)
   if (!date) return { error: "Invalid date" }
@@ -97,12 +99,53 @@ export async function getAvailableSlots(
     return { slots: [], onLeave: true }
   }
 
-  const schedule = normalizeWeek(doctor.schedule)
+  let schedule = normalizeWeek(doctor.schedule)
+
+  if (appointmentId) {
+    if (!mongoose.Types.ObjectId.isValid(appointmentId)) {
+      return { slots: [], error: "Invalid appointment" }
+    }
+
+    const appointment = await Appointment.findOne({
+      _id: appointmentId,
+      patient: session.user.id,
+      doctor: doctorId,
+      status: { $in: ["pending", "confirmed"] },
+    })
+      .select("scheduleChangeRequestId")
+      .lean()
+
+    if (!appointment) {
+      return {
+        slots: [],
+        error: "Appointment not found or no longer needs rescheduling",
+      }
+    }
+
+    if (appointment.scheduleChangeRequestId) {
+      const scheduleRequest = await DoctorScheduleRequest.findOne({
+        _id: appointment.scheduleChangeRequestId,
+        doctor: doctorId,
+        status: "pending",
+      })
+        .select("requestedSchedule")
+        .lean()
+
+      if (!scheduleRequest) {
+        return {
+          slots: [],
+          error: "The schedule-change request is no longer active.",
+        }
+      }
+
+      schedule = normalizeWeek(scheduleRequest.requestedSchedule)
+    }
+  }
+
   const taken = await bookedTimes(doctorId, date)
 
   return { slots: availableSlots(schedule, date, taken) }
 }
-
 /** Returns only dates covered by approved leave or older status-less records. */
 export async function getDoctorLeaveDates(
   doctorId: string,

@@ -53,13 +53,18 @@ export type PendingDoctorLeaveRow = {
     endDate: string
     reason: string
 }
+export type RejectedDoctorLeaveRow = PendingDoctorLeaveRow & {
+    adminNote: string
+}
 
 export function DoctorLeavesManager({
     leaves,
     pendingRequests,
+    rejectedRequests,
 }: {
     leaves: DoctorLeaveRow[]
     pendingRequests: PendingDoctorLeaveRow[]
+    rejectedRequests: RejectedDoctorLeaveRow[]
 }) {
     const { language } = useLanguage()
     const isArabic = language === "ar"
@@ -254,6 +259,44 @@ export function DoctorLeavesManager({
                     </div>
                 )}
             </section>
+            <section className="space-y-4 rounded-xl border bg-card p-4">
+    <h2 className="text-lg font-semibold">
+        {t(language, "Rejected Leave Requests")}
+    </h2>
+
+    {rejectedRequests.length === 0 ? (
+        <p className="text-sm text-muted-foreground">
+            {t(language, "No rejected leave requests.")}
+        </p>
+    ) : (
+        <div className="space-y-3">
+            {rejectedRequests.map((request) => (
+                <div key={request.id} className="rounded-lg border p-4">
+                    <p className="font-semibold">
+                        {isArabic
+                            ? request.doctorNameAr || request.doctorName
+                            : request.doctorName}
+                    </p>
+                    <p className="text-sm text-muted-foreground">
+                        {request.specialty} · {request.startDate} – {request.endDate}
+                    </p>
+
+                    {request.reason && (
+                        <p className="mt-2 text-sm">
+                            {t(language, "Reason")}: {request.reason}
+                        </p>
+                    )}
+
+                    {request.adminNote && (
+                        <p className="mt-2 text-sm">
+                            {t(language, "Administrator note")}: {request.adminNote}
+                        </p>
+                    )}
+                </div>
+            ))}
+        </div>
+    )}
+</section>
 
             {/* Search and status filter */}
             <div className="flex flex-col gap-4 md:flex-row">

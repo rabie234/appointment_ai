@@ -2,7 +2,7 @@
 
 import Link from "next/link"
 import { usePathname } from "next/navigation"
-import { Calendar, UserCog, HeartPulse } from "lucide-react"
+import { Calendar, CalendarDays, Clock, UserCog, HeartPulse } from "lucide-react"
 import { LogoutButton } from "./logout-button"
 import { cn } from "@/lib/utils"
 import { LanguageSwitcher } from "@/components/i18n/language-switcher"
@@ -11,7 +11,9 @@ import { t } from "@/components/i18n/translations"
 
 const doctorNavItems = [
     { name: "Appointments", href: "/doctor/appointments", icon: Calendar },
+    { name: "Leaves", href: "/doctor/leaves", icon: CalendarDays },
     { name: "My Account", href: "/doctor/account", icon: UserCog },
+    { name: "Working Hours", href: "/doctor/working-hours", icon: Clock },
 ]
 
 export function DoctorSidebar() {

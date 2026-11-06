@@ -1,4 +1,3 @@
-
 "use server"
 
 import { revalidatePath } from "next/cache"
@@ -8,12 +7,14 @@ import { requireRole } from "@/lib/session"
 import Appointment from "@/models/Appointment"
 import Doctor from "@/models/Doctor"
 import DoctorLeave from "@/models/DoctorLeave"
+import DoctorScheduleRequest from "@/models/DoctorScheduleRequest"
 import {
+    dayOfWeek,
     isValidTime,
     normalizeWeek,
     slotsForDay,
-    dayOfWeek,
 } from "@/lib/schedule"
+
 export async function cancelPendingAppointment(appointmentId: string) {
     try {
         const session = await requireRole("patient")
@@ -38,10 +39,11 @@ export async function cancelPendingAppointment(appointmentId: string) {
                     status: "cancelled",
                     cancellationReason: "Cancelled by you",
                 },
+                $unset: {
+                    scheduleChangeRequestId: "",
+                },
             },
-            {
-                new: true,
-            }
+            { new: true }
         )
 
         if (!appointment) {
@@ -52,6 +54,7 @@ export async function cancelPendingAppointment(appointmentId: string) {
         }
 
         revalidatePath("/appointments")
+        revalidatePath("/admin/schedule-requests")
 
         return {
             success: true,
@@ -68,8 +71,8 @@ export async function cancelPendingAppointment(appointmentId: string) {
 }
 
 /**
- * Cancel an appointment affected by doctor leave.
- * Only the patient who owns it can cancel it.
+ * Allows the patient to cancel an appointment affected by doctor leave
+ * or a pending working-hours change.
  */
 export async function cancelLeaveConflictAppointment(
     appointmentId: string
@@ -88,13 +91,24 @@ export async function cancelLeaveConflictAppointment(
                 _id: appointmentId,
                 patient: session.user.id,
                 status: { $in: ["pending", "confirmed"] },
-                leaveConflict: true,
+                $or: [
+                    { leaveConflict: true },
+                    {
+                        scheduleChangeRequestId: {
+                            $exists: true,
+                            $ne: null,
+                        },
+                    },
+                ],
             },
             {
                 $set: {
                     status: "cancelled",
                     cancellationReason: "Cancelled by you",
                     leaveConflict: false,
+                },
+                $unset: {
+                    scheduleChangeRequestId: "",
                 },
             },
             { new: true }
@@ -104,23 +118,31 @@ export async function cancelLeaveConflictAppointment(
             return {
                 success: false,
                 message:
-                    "This appointment cannot be cancelled or is no longer affected by doctor leave.",
+                    "This appointment cannot be cancelled or no longer needs attention.",
             }
         }
 
         revalidatePath("/appointments")
+        revalidatePath("/admin/schedule-requests")
 
-        return { success: true, message: "Appointment cancelled" }
+        return {
+            success: true,
+            message: "Appointment cancelled",
+        }
     } catch (error) {
-        console.error("Failed to cancel leave-conflict appointment:", error)
-        return { success: false, message: "Cancellation failed" }
+        console.error("Failed to cancel affected appointment:", error)
+
+        return {
+            success: false,
+            message: "Cancellation failed",
+        }
     }
 }
 
 /**
- * Reschedule an appointment affected by doctor leave.
- * Validates the new date, doctor schedule, leave, and slot availability
- * on the server before updating the appointment.
+ * Reschedules an appointment affected by doctor leave or a pending
+ * working-hours change. For a working-hours change, the new time must fit
+ * the doctor's proposed schedule.
  */
 export async function rescheduleLeaveConflictAppointment(
     appointmentId: string,
@@ -155,7 +177,10 @@ export async function rescheduleLeaveConflictAppointment(
         today.setUTCHours(0, 0, 0, 0)
 
         if (date < today) {
-            return { success: false, message: "That date has already passed" }
+            return {
+                success: false,
+                message: "That date has already passed",
+            }
         }
 
         await connectDB()
@@ -164,7 +189,15 @@ export async function rescheduleLeaveConflictAppointment(
             _id: appointmentId,
             patient: session.user.id,
             status: { $in: ["pending", "confirmed"] },
-            leaveConflict: true,
+            $or: [
+                { leaveConflict: true },
+                {
+                    scheduleChangeRequestId: {
+                        $exists: true,
+                        $ne: null,
+                    },
+                },
+            ],
         })
 
         if (!appointment) {
@@ -185,36 +218,53 @@ export async function rescheduleLeaveConflictAppointment(
             }
         }
 
-        // A leave day cannot be selected.
-        const { start, end } = {
-            start: new Date(date),
-            end: new Date(date),
+        let schedule = normalizeWeek(doctor.schedule)
+
+        if (appointment.scheduleChangeRequestId) {
+            const scheduleRequest = await DoctorScheduleRequest.findOne({
+                _id: appointment.scheduleChangeRequestId,
+                doctor: appointment.doctor,
+                status: "pending",
+            })
+                .select("requestedSchedule")
+                .lean()
+
+            if (!scheduleRequest) {
+                return {
+                    success: false,
+                    message: "The schedule-change request is no longer active.",
+                }
+            }
+
+            schedule = normalizeWeek(scheduleRequest.requestedSchedule)
         }
+
+        const start = new Date(date)
         start.setUTCHours(0, 0, 0, 0)
-        end.setUTCHours(0, 0, 0, 0)
+
+        const end = new Date(start)
         end.setUTCDate(end.getUTCDate() + 1)
 
-       const leave = await DoctorLeave.findOne({
-    doctor: appointment.doctor,
-    startDate: { $lt: end },
-    endDate: { $gt: start },
-    $or: [
-        { status: "approved" },
-        { status: { $exists: false } },
-    ],
-})
-    .select("_id")
-    .lean()
+        const leave = await DoctorLeave.findOne({
+            doctor: appointment.doctor,
+            startDate: { $lt: end },
+            endDate: { $gt: start },
+            $or: [
+                { status: "approved" },
+                { status: { $exists: false } },
+            ],
+        })
+            .select("_id")
+            .lean()
 
         if (leave) {
             return {
                 success: false,
-                message: "The doctor is on leave on this date. Choose another date.",
+                message:
+                    "The doctor is on leave on this date. Choose another date.",
             }
         }
 
-        // Validate the selected time against the doctor's weekly schedule.
-        const schedule = normalizeWeek(doctor.schedule)
         const day = dayOfWeek(date)
         const entry = schedule.find((item) => item.day === day)
 
@@ -225,31 +275,37 @@ export async function rescheduleLeaveConflictAppointment(
             }
         }
 
-        // Ignore the appointment being moved when checking occupied slots.
         const existing = await Appointment.find({
             doctor: appointment.doctor,
             date: { $gte: start, $lt: end },
             status: { $ne: "cancelled" },
             _id: { $ne: appointment._id },
-        }).select("time").lean()
+        })
+            .select("time")
+            .lean()
 
         if (existing.some((item) => item.time === time)) {
             return {
                 success: false,
-                message: "That slot was just taken. Please choose another time.",
+                message:
+                    "That slot was just taken. Please choose another time.",
             }
         }
 
-        // Clear the conflict only after a valid new slot is found.
         appointment.date = date
         appointment.time = time
         appointment.leaveConflict = false
+        appointment.scheduleChangeRequestId = undefined
         await appointment.save()
 
         revalidatePath("/appointments")
         revalidatePath("/admin/appointments")
+        revalidatePath("/admin/schedule-requests")
 
-        return { success: true, message: "Appointment rescheduled successfully" }
+        return {
+            success: true,
+            message: "Appointment rescheduled successfully",
+        }
     } catch (error: unknown) {
         if (
             typeof error === "object" &&
@@ -259,12 +315,16 @@ export async function rescheduleLeaveConflictAppointment(
         ) {
             return {
                 success: false,
-                message: "That slot was just taken. Please choose another time.",
+                message:
+                    "That slot was just taken. Please choose another time.",
             }
         }
 
-        console.error("Failed to reschedule leave-conflict appointment:", error)
-        return { success: false, message: "Rescheduling failed" }
+        console.error("Failed to reschedule affected appointment:", error)
+
+        return {
+            success: false,
+            message: "Rescheduling failed",
+        }
     }
 }
-

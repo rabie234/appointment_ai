@@ -88,7 +88,11 @@ const [rescheduling, setRescheduling] = useState(false)
     if (!active) return
 
     startLoadingSlots(async () => {
-        const res = await getAvailableSlots(doctorId, selectedDate)
+        const res = await getAvailableSlots(
+    doctorId,
+    selectedDate,
+    rescheduleAppointmentId ?? undefined
+)
         setSlots(res.slots ?? [])
         setOnLeave(res.onLeave ?? false)
     })

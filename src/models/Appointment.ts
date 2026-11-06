@@ -18,6 +18,7 @@ export interface IAppointment extends Document {
   completedAt?: Date;
   createdAt: Date;
   updatedAt: Date;
+  scheduleChangeRequestId?: mongoose.Types.ObjectId;
 }
 
 const AppointmentSchema = new Schema<IAppointment>(
@@ -27,6 +28,10 @@ const AppointmentSchema = new Schema<IAppointment>(
       ref: 'User',
       required: [true, 'Please provide a patient'],
     },
+    scheduleChangeRequestId: {
+  type: Schema.Types.ObjectId,
+  ref: "DoctorScheduleRequest",
+},
     doctor: {
       type: Schema.Types.ObjectId,
       ref: 'Doctor',
@@ -76,6 +81,7 @@ const AppointmentSchema = new Schema<IAppointment>(
   {
     timestamps: true,
   }
+  
 );
 
 // Index for efficient queries

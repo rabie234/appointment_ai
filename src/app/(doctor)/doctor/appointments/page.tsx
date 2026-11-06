@@ -2,7 +2,6 @@ import { cookies } from "next/headers"
 import connectDB from "@/lib/mongodb"
 import { requireDoctor } from "@/lib/doctor-session"
 import { slotEnd } from "@/lib/schedule"
-import { appointmentHasPassed } from "@/lib/appointment-transitions"
 import Appointment from "@/models/Appointment"
 import { NoProfile } from "../no-profile"
 import {
@@ -81,9 +80,6 @@ export default async function DoctorAppointmentsPage() {
 
     const appointments: DoctorAppointment[] = docs.map((appointment) => {
         const day = new Date(appointment.date).getTime()
-        const open =
-            appointment.status === "pending" ||
-            appointment.status === "confirmed"
 
         return {
             id: String(appointment._id),
@@ -106,8 +102,6 @@ export default async function DoctorAppointmentsPage() {
             startedAt: stampTime(appointment.startedAt, locale),
             completedAt: stampTime(appointment.completedAt, locale),
             cancellationReason: appointment.cancellationReason ?? "",
-            canMarkMissed:
-                open && appointmentHasPassed(appointment.date, appointment.time),
         }
     })
 

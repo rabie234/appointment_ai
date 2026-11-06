@@ -81,6 +81,7 @@ export default async function MyAppointmentsPage() {
             statusLabel: STATUS_LABEL[status] ?? status,
             type: a.type,
             price: `$${a.price.toFixed(2)}`,
+            scheduleChangeRequested: Boolean(a.scheduleChangeRequestId),
             cancellationReason: a.cancellationReason ?? "",
         }
     })
