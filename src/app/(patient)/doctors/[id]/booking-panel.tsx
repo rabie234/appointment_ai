@@ -118,16 +118,12 @@ const [rescheduling, setRescheduling] = useState(false)
             selectedDate,
             selectedTime
         )
-
-        if (!result.success) {
-            window.alert(
-                result.message ||
-                    (language === "ar"
-                        ? "تعذّرت إعادة جدولة الموعد."
-                        : "Could not reschedule the appointment.")
-            )
-            return
-        }
+if (!result.success) {
+    window.alert(
+        t(language, result.message || "Could not reschedule the appointment.")
+    )
+    return
+}
 
         router.push("/appointments")
         router.refresh()

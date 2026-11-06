@@ -12,6 +12,7 @@ import { t } from "@/components/i18n/translations"
 import {
     approveScheduleChange,
     rejectScheduleChange,
+    requestPatientReschedule,
 } from "./actions"
 import { Loader2 } from "lucide-react"
 
@@ -72,7 +73,38 @@ export function ScheduleRequestsManager({
     const { language } = useLanguage()
     const router = useRouter()
     const [reviewingId, setReviewingId] = useState<string | null>(null)
+    const [requestingAppointmentId, setRequestingAppointmentId] =
+        useState<string | null>(null)
     const [notes, setNotes] = useState<Record<string, string>>({})
+
+    async function sendRescheduleRequest(
+        requestId: string,
+        appointmentId: string
+    ) {
+        setRequestingAppointmentId(appointmentId)
+
+        try {
+            const result = await requestPatientReschedule(
+                requestId,
+                appointmentId
+            )
+
+            if (result.error) {
+                window.alert(t(language, result.error))
+            } else {
+                router.refresh()
+            }
+        } catch {
+            window.alert(
+                t(
+                    language,
+                    "Could not send the rescheduling request. Please try again."
+                )
+            )
+        } finally {
+            setRequestingAppointmentId(null)
+        }
+    }
 
     async function reviewRequest(
         id: string,
@@ -141,6 +173,7 @@ export function ScheduleRequestsManager({
                                               request.doctorName
                                             : request.doctorName}
                                     </h2>
+
                                     <p className="text-sm text-muted-foreground">
                                         {request.specialty} ·{" "}
                                         {dateFormatter.format(
@@ -167,6 +200,7 @@ export function ScheduleRequestsManager({
                                     schedule={request.currentSchedule}
                                     language={language}
                                 />
+
                                 <ScheduleColumn
                                     title="Requested hours"
                                     schedule={request.requestedSchedule}
@@ -185,6 +219,7 @@ export function ScheduleRequestsManager({
                                     <h3 className="font-semibold">
                                         {t(language, "Affected appointments")}
                                     </h3>
+
                                     <Badge variant="secondary">
                                         {request.conflicts.length}
                                     </Badge>
@@ -212,6 +247,7 @@ export function ScheduleRequestsManager({
                                                                     conflict.patientName
                                                                 }
                                                             </p>
+
                                                             <p className="text-sm text-muted-foreground">
                                                                 {dateFormatter.format(
                                                                     new Date(
@@ -227,12 +263,48 @@ export function ScheduleRequestsManager({
                                                             </p>
                                                         </div>
 
-                                                        <Badge variant="secondary">
-                                                            {t(
-                                                                language,
-                                                                conflict.status
+                                                        <div className="flex flex-wrap items-center gap-2">
+                                                            <Badge variant="secondary">
+                                                                {t(
+                                                                    language,
+                                                                    conflict.status
+                                                                )}
+                                                            </Badge>
+
+                                                            {conflict.rescheduleRequested ? (
+                                                                <Badge variant="secondary">
+                                                                    {t(
+                                                                        language,
+                                                                        "Reschedule request sent"
+                                                                    )}
+                                                                </Badge>
+                                                            ) : (
+                                                                <Button
+                                                                    type="button"
+                                                                    size="sm"
+                                                                    variant="outline"
+                                                                    disabled={
+                                                                        requestingAppointmentId ===
+                                                                        conflict.id
+                                                                    }
+                                                                    onClick={() =>
+                                                                        sendRescheduleRequest(
+                                                                            request.id,
+                                                                            conflict.id
+                                                                        )
+                                                                    }
+                                                                >
+                                                                    {requestingAppointmentId ===
+                                                                        conflict.id && (
+                                                                        <Loader2 className="me-2 h-4 w-4 animate-spin" />
+                                                                    )}
+                                                                    {t(
+                                                                        language,
+                                                                        "Ask patient to choose a new time"
+                                                                    )}
+                                                                </Button>
                                                             )}
-                                                        </Badge>
+                                                        </div>
                                                     </div>
                                                 )
                                             )}

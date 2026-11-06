@@ -72,6 +72,7 @@ export default async function MyAppointmentsPage() {
             id: String(a._id),
             doctorId: String(a.doctor?._id ?? a.doctor),
             leaveConflict: a.leaveConflict ?? false,
+            scheduleChangeRequested: Boolean(a.scheduleChangeRequestId),
             doctor: a.doctor?.name ?? "Unknown doctor",
             doctorAr: a.doctor?.nameAr ?? "",
             specialty: a.doctor?.specialty ?? "",
@@ -81,7 +82,6 @@ export default async function MyAppointmentsPage() {
             statusLabel: STATUS_LABEL[status] ?? status,
             type: a.type,
             price: `$${a.price.toFixed(2)}`,
-            scheduleChangeRequested: Boolean(a.scheduleChangeRequestId),
             cancellationReason: a.cancellationReason ?? "",
         }
     })

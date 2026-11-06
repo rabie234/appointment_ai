@@ -570,6 +570,19 @@ const translations = {
 "Reschedule request sent": "تم إرسال طلب إعادة الجدولة",
 "Could not send the rescheduling request. Please try again.": "تعذّر إرسال طلب إعادة الجدولة. يُرجى المحاولة مرة أخرى.",
 "Could not apply the approved schedule. Please try again.": "تعذّر تطبيق جدول العمل المعتمد. يُرجى المحاولة مرة أخرى.",
+"Invalid appointment": "الموعد غير صالح.",
+"Invalid date": "التاريخ غير صالح.",
+"Invalid time": "الوقت غير صالح.",
+"That date has already passed": "لقد مضى هذا التاريخ.",
+"Appointment not found or no longer needs rescheduling": "لم يتم العثور على الموعد أو لم يعد بحاجة إلى إعادة جدولة.",
+"The schedule-change request is no longer active.": "لم يعد طلب تغيير ساعات العمل فعالاً.",
+"This doctor is not accepting appointments": "هذا الطبيب لا يستقبل مواعيد حالياً.",
+"The doctor is on leave on this date. Choose another date.": "الطبيب في إجازة في هذا التاريخ. اختر تاريخاً آخر.",
+"The doctor is not available at that time": "الطبيب غير متاح في هذا الوقت.",
+"That slot was just taken. Please choose another time.": "تم حجز هذا الوقت للتو. يُرجى اختيار وقت آخر.",
+"Could not reschedule the appointment.": "تعذّرت إعادة جدولة الموعد.",
+
+"Could not cancel the appointment.": "تعذّر إلغاء الموعد.",
 } as const;
 
 export function t(language: Language, text: string): string {

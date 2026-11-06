@@ -28,6 +28,7 @@ function revalidateSchedulePages() {
     revalidatePath("/doctor/working-hours")
     revalidatePath("/admin/doctors")
     revalidatePath("/doctors")
+    revalidatePath("/appointments")
 }
 
 export async function approveScheduleChange(
@@ -161,10 +162,16 @@ export async function approveScheduleChange(
         )
 
         console.error("Apply approved schedule change failed:", error)
+
         return {
             error: "Could not apply the approved schedule. Please try again.",
         }
     }
+
+    await Appointment.updateMany(
+        { scheduleChangeRequestId: requestId },
+        { $unset: { scheduleChangeRequestId: "" } }
+    )
 
     revalidateSchedulePages()
     return { success: true }
@@ -198,9 +205,15 @@ export async function rejectScheduleChange(
         return { error: "Pending schedule request not found." }
     }
 
+    await Appointment.updateMany(
+        { scheduleChangeRequestId: requestId },
+        { $unset: { scheduleChangeRequestId: "" } }
+    )
+
     revalidateSchedulePages()
     return { success: true }
 }
+
 export async function requestPatientReschedule(
     requestId: string,
     appointmentId: string
@@ -283,6 +296,7 @@ export async function requestPatientReschedule(
     const updated = await Appointment.updateOne(
         {
             _id: appointmentId,
+            doctor: request.doctor,
             status: { $in: ["pending", "confirmed"] },
             $or: [
                 { scheduleChangeRequestId: { $exists: false } },
