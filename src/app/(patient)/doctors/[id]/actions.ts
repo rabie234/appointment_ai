@@ -16,6 +16,10 @@ import DoctorLeave from "@/models/DoctorLeave"
 import { parseCalendarDate as parseDay } from "@/lib/date-validation"
 import mongoose from "mongoose"
 import DoctorScheduleRequest from "@/models/DoctorScheduleRequest"
+import {
+  findActiveAppointmentInSpecialty,
+  type ActiveSpecialtyAppointment,
+} from "@/lib/booking-policy"
 import { notifyAdmins, notifyUser } from "@/lib/notification-service"
 /** The UTC start and exclusive end of a day. */
 function dayBounds(date: Date): { start: Date; end: Date } {
@@ -199,6 +203,7 @@ export async function getDoctorLeaveDates(
 export type BookingState = {
   error?: string
   success?: boolean
+  existingAppointment?: ActiveSpecialtyAppointment
 }
 
 const CONSULTATION_FEE = 120
@@ -238,13 +243,25 @@ export async function bookAppointment(
   await connectDB()
 
   const doctor = await Doctor.findById(doctorId)
-    .select("schedule status")
+    .select("schedule status specialty")
     .lean()
 
   if (!doctor) return { error: "Doctor not found" }
 
   if (doctor.status !== "active") {
     return { error: "This doctor is not accepting appointments" }
+  }
+
+  const existingAppointment = await findActiveAppointmentInSpecialty(
+    session.user.id,
+    doctor.specialty ?? "",
+  )
+  if (existingAppointment) {
+    return {
+      error:
+        "You already have an active appointment in this specialty. Finish or cancel it before booking another.",
+      existingAppointment,
+    }
   }
 
   if (await isDoctorOnLeave(doctorId, date)) {

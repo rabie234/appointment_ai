@@ -8,7 +8,12 @@ import Specialty from "@/models/Specialty";
 import Appointment from "@/models/Appointment";
 import { randomUUID } from "node:crypto";
 import { searchKnowledge } from "@/lib/knowledge-server";
-import { bookingIsAuthorized, type ToolContext } from "@/lib/booking-policy";
+import {
+  bookingIsAuthorized,
+  findActiveAppointmentInSpecialty,
+  type ToolContext,
+} from "@/lib/booking-policy";
+import { notifyAdmins, notifyUser } from "@/lib/notification-service";
 
 /**
  * The tools the AI assistant can call. Most are READ-ONLY — they look up the
@@ -48,7 +53,8 @@ export const functionDeclarations: FunctionDeclaration[] = [
       "Search active clinic doctors by specialty, doctor name, or both. " +
       "When a patient requests a specific doctor, search by name across all specialties, " +
       "without restricting the search to the recommended specialty. " +
-      "Return each doctor id, name, actual specialty, rating, and experience.",
+      "Return each doctor id, name, actual specialty, rating, and experience. " +
+      "If activeAppointmentInRequestedSpecialty is present, tell the patient they already have an active appointment in that specialty and do not suggest another booking there.",
     parameters: {
       type: Type.OBJECT,
       properties: {
@@ -91,7 +97,8 @@ export const functionDeclarations: FunctionDeclaration[] = [
       "Call this once you have settled on a specific doctor, date and free time to recommend " +
       'to the patient. It records a structured suggestion the UI shows with a "Confirm booking" ' +
       "button. Do NOT book yet — wait for the patient to confirm. Only use a doctorId/date/time " +
-      "you obtained from the other tools.",
+      "you obtained from the other tools. If the result contains existingAppointment, explain " +
+      "that booking another appointment in that specialty is blocked until the current one ends.",
     parameters: {
       type: Type.OBJECT,
       properties: {
@@ -190,7 +197,10 @@ async function listSpecialties() {
   return { specialties: names };
 }
 
-async function findDoctors(args: { specialty?: string; name?: string }) {
+async function findDoctors(
+  args: { specialty?: string; name?: string },
+  patientId: string,
+) {
   const specialty = String(args.specialty ?? "").trim();
   const name = String(args.name ?? "").trim();
   if (!specialty && !name) {
@@ -210,6 +220,10 @@ async function findDoctors(args: { specialty?: string; name?: string }) {
     .limit(20)
     .lean();
 
+  const activeAppointmentInRequestedSpecialty = specialty
+    ? await findActiveAppointmentInSpecialty(patientId, specialty)
+    : null;
+
   return {
     doctors: docs.map((d) => ({
       doctorId: String(d._id),
@@ -219,6 +233,9 @@ async function findDoctors(args: { specialty?: string; name?: string }) {
       experience: d.experience ?? "",
       availability: d.availability,
     })),
+    ...(activeAppointmentInRequestedSpecialty
+      ? { activeAppointmentInRequestedSpecialty }
+      : {}),
   };
 }
 
@@ -366,11 +383,14 @@ async function proposeCancellation(
  * either a confirmed suggestion (attached to the action's response) or an error
  * the model should react to.
  */
-async function proposeBooking(args: {
-  doctorId?: string;
-  date?: string;
-  time?: string;
-}) {
+async function proposeBooking(
+  args: {
+    doctorId?: string;
+    date?: string;
+    time?: string;
+  },
+  patientId: string,
+) {
   const doctorId = String(args.doctorId ?? "");
   const date = String(args.date ?? "");
   const time = String(args.time ?? "");
@@ -386,6 +406,19 @@ async function proposeBooking(args: {
     .lean();
   if (!doctor || doctor.status !== "active") {
     return { ok: false, error: "That doctor is not available" };
+  }
+
+  const existingAppointment = await findActiveAppointmentInSpecialty(
+    patientId,
+    doctor.specialty ?? "",
+  );
+  if (existingAppointment) {
+    return {
+      ok: false,
+      error:
+        "You already have an active appointment in this specialty. Finish or cancel it before booking another.",
+      existingAppointment,
+    };
   }
 
   const { slots, error } = await freeSlotsFor(doctorId, date);
@@ -454,6 +487,19 @@ async function confirmBooking(
     return { booked: false, reason: "That doctor is not available" };
   }
 
+  const existingAppointment = await findActiveAppointmentInSpecialty(
+    patientId,
+    doctor.specialty ?? "",
+  );
+  if (existingAppointment) {
+    return {
+      booked: false,
+      reason:
+        "You already have an active appointment in this specialty. Finish or cancel it before booking another.",
+      existingAppointment,
+    };
+  }
+
   // The source of truth for "is this slot bookable right now".
   const { slots, error } = await freeSlotsFor(doctorId, date);
   if (error) return { booked: false, reason: error };
@@ -477,6 +523,23 @@ async function confirmBooking(
       status: "pending",
       price: CONSULTATION_FEE,
     });
+
+    await Promise.all([
+      notifyUser(patientId, {
+        category: "appointment",
+        titleKey: "Notification: Appointment request received",
+        bodyKey: "Notification body: The clinic received your appointment request.",
+        href: "/appointments",
+        context: date + " · " + time,
+      }),
+      notifyAdmins({
+        category: "appointment",
+        titleKey: "Notification: New appointment request",
+        bodyKey: "Notification body: A patient submitted an appointment request that needs confirmation.",
+        href: "/admin/appointments",
+        context: date + " · " + time,
+      }),
+    ]);
 
     const confirmation: BookingConfirmation = {
       appointmentId: String(appt._id),
@@ -531,11 +594,11 @@ export async function runTool(
     case "list_specialties":
       return { result: await listSpecialties() };
     case "find_doctors":
-      return { result: await findDoctors(args) };
+      return { result: await findDoctors(args, patientId) };
     case "get_available_slots":
       return { result: await getAvailableSlots(args) };
     case "propose_booking": {
-      const res = await proposeBooking(args);
+      const res = await proposeBooking(args, patientId);
       return res.ok
         ? { result: { ok: true }, suggestion: res.suggestion }
         : { result: res };

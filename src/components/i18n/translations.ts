@@ -638,6 +638,7 @@ const translations = {
     "Notification body: An approved leave period was cancelled by the clinic.": "ألغت العيادة فترة إجازة معتمدة.",
     "Notification: Leave scheduled by clinic": "تمت جدولة الإجازة من قبل العيادة.",
     "Notification body: The clinic scheduled an approved leave period for you.": "جدولت العيادة فترة إجازة معتمدة لك.",
+    "You already have an active appointment in this specialty. Finish or cancel it before booking another.": "لديك موعد قائم بالفعل في هذا الاختصاص. انتظر اكتمال الموعد أو ألغِه قبل حجز موعد آخر.",
 } as const;
 
 export function t(language: Language, text: string): string {

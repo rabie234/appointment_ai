@@ -277,9 +277,17 @@ if (!result.success) {
                         </div>
 
                         {state.error && (
-                            <p className="rounded-md bg-destructive/10 px-3 py-2 text-sm font-medium text-destructive">
-                                {state.error}
-                            </p>
+                            <div className="rounded-md bg-destructive/10 px-3 py-2 text-sm font-medium text-destructive">
+                                <p>{t(language, state.error)}</p>
+                                {state.existingAppointment && (
+                                    <p className="mt-1 text-xs">
+                                        {state.existingAppointment.doctorName} ·{" "}
+                                        {state.existingAppointment.specialty} ·{" "}
+                                        {state.existingAppointment.date} ·{" "}
+                                        {state.existingAppointment.time}
+                                    </p>
+                                )}
+                            </div>
                         )}
 
                         <div className="pt-4 border-t space-y-4">

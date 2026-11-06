@@ -146,12 +146,42 @@ export async function POST(req: NextRequest) {
             const result = tool.result as {
               reason?: string;
               alternatives?: string[];
+              existingAppointment?: {
+                doctorName?: string;
+                specialty?: string;
+                date?: string;
+                time?: string;
+              };
             };
-            text = `${result.reason ?? "The appointment could not be booked."} ${
-              result.alternatives?.length
-                ? `Available alternatives: ${result.alternatives.join(", ")}. Ask me to suggest a new time.`
-                : "Please ask me to look for a new appointment."
-            }`;
+            if (result.existingAppointment) {
+              const existing = result.existingAppointment;
+              text =
+                responseLanguage === "Arabic"
+                  ? "لديك موعد قائم بالفعل مع الطبيب " +
+                    (existing.doctorName ?? "") +
+                    " في اختصاص " +
+                    (existing.specialty ?? "") +
+                    " بتاريخ " +
+                    (existing.date ?? "") +
+                    " الساعة " +
+                    (existing.time ?? "") +
+                    ". لا يمكنك حجز موعد آخر في الاختصاص نفسه حتى يكتمل الموعد الحالي أو يتم إلغاؤه."
+                  : "You already have an active appointment with Dr. " +
+                    (existing.doctorName ?? "") +
+                    " in " +
+                    (existing.specialty ?? "this specialty") +
+                    " on " +
+                    (existing.date ?? "") +
+                    " at " +
+                    (existing.time ?? "") +
+                    ". You cannot book another appointment in the same specialty until the current appointment is completed or cancelled.";
+            } else {
+              text = `${result.reason ?? "The appointment could not be booked."} ${
+                result.alternatives?.length
+                  ? `Available alternatives: ${result.alternatives.join(", ")}. Ask me to suggest a new time.`
+                  : "Please ask me to look for a new appointment."
+              }`;
+            }
           }
           send({ type: "delta", text });
         } else {
