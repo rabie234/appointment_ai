@@ -580,7 +580,7 @@ const translations = {
 "The doctor is not available at that time": "الطبيب غير متاح في هذا الوقت.",
 "That slot was just taken. Please choose another time.": "تم حجز هذا الوقت للتو. يُرجى اختيار وقت آخر.",
 "Could not reschedule the appointment.": "تعذّرت إعادة جدولة الموعد.",
-
+"Find Doctor & Book": "ابحث عن طبيب واحجز موعدًا",
 "Could not cancel the appointment.": "تعذّر إلغاء الموعد.",
     "Notifications": "الإشعارات",
     "Mark all read": "تحديد الكل كمقروء",

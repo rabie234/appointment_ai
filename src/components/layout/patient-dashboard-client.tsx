@@ -31,10 +31,24 @@ type DashboardProps = {
 };
 
 const QUICK_ACTIONS = [
-  { title: "Book Appointment", icon: PlusCircle, color: "bg-blue-500", href: "/doctors" },
-  { title: "Chat with AI", icon: MessageSquare, color: "bg-purple-500", href: "/ai-chat" },
-  { title: "View Doctors", icon: Users, color: "bg-emerald-500", href: "/doctors" },
-  { title: "My Appointments", icon: Calendar, color: "bg-orange-500", href: "/appointments" },
+  {
+    title: "Find Doctor & Book",
+    icon: PlusCircle,
+    color: "bg-blue-500",
+    href: "/doctors",
+  },
+  {
+    title: "Chat with AI",
+    icon: MessageSquare,
+    color: "bg-purple-500",
+    href: "/ai-chat",
+  },
+  {
+    title: "My Appointments",
+    icon: Calendar,
+    color: "bg-orange-500",
+    href: "/appointments",
+  },
 ];
 
 function formatDate(date: string, language: "en" | "ar") {
@@ -117,7 +131,7 @@ export default function PatientDashboardClient({
         />
       </div>
 
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
         {QUICK_ACTIONS.map((action) => (
           <Link key={action.title} href={action.href}>
             <Card className="group hover:shadow-md hover:-translate-y-0.5 transition-all cursor-pointer border-none bg-card/60">

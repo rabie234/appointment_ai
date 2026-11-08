@@ -1,9 +1,14 @@
+
 import { notFound } from "next/navigation"
 import { isValidObjectId } from "mongoose"
+
 import connectDB from "@/lib/mongodb"
 import { requireRole } from "@/lib/session"
 import { normalizeWeek } from "@/lib/schedule"
+
 import Doctor from "@/models/Doctor"
+import Appointment from "@/models/Appointment"
+
 import DoctorProfileDisplay from "./doctor-profile-display"
 
 export const dynamic = "force-dynamic"
@@ -16,6 +21,7 @@ export default async function DoctorProfilePage({
     params: Promise<{ id: string }>
 }) {
     await requireRole("patient")
+
     const { id } = await params
 
     if (!isValidObjectId(id)) notFound()
@@ -26,7 +32,65 @@ export default async function DoctorProfilePage({
 
     if (!doctor) notFound()
 
+    // Calculate doctor statistics from real appointment records
+    const [appointmentCounts, uniquePatients] = await Promise.all([
+        Appointment.aggregate([
+            {
+                $match: {
+                    doctor: doctor._id,
+                    status: { $in: ["completed", "missed"] },
+                },
+            },
+            {
+                $group: {
+                    _id: "$status",
+                    count: { $sum: 1 },
+                },
+            },
+        ]),
+
+        Appointment.distinct("patient", {
+            doctor: doctor._id,
+            status: "completed",
+        }),
+    ])
+
+    const completedCount =
+        appointmentCounts.find(
+            (item) => item._id === "completed"
+        )?.count ?? 0
+
+    const missedCount =
+        appointmentCounts.find(
+            (item) => item._id === "missed"
+        )?.count ?? 0
+
+    const totalEligibleAppointments =
+        completedCount + missedCount
+
+    const successRate =
+        totalEligibleAppointments > 0
+            ? Math.round(
+                  (completedCount / totalEligibleAppointments) * 100
+              )
+            : null
+
+    const totalPatients = uniquePatients.length
+
+    // Temporary debugging logs
+    console.log("DOCTOR ID:", String(doctor._id))
+    console.log("COMPLETED:", completedCount)
+    console.log("MISSED:", missedCount)
+    console.log(
+        "UNIQUE COMPLETED PATIENTS:",
+        uniquePatients.map(String)
+    )
+    console.log("TOTAL PATIENTS:", totalPatients)
+    console.log("SUCCESS RATE:", successRate)
+
+    // Prepare doctor working schedule
     const schedule = normalizeWeek(doctor.schedule)
+
     const workingDays = schedule
         .filter((day) => !day.closed)
         .map((day) => ({
@@ -46,8 +110,8 @@ export default async function DoctorProfilePage({
                 rating: doctor.rating,
                 reviews: doctor.reviews,
                 experience: doctor.experience,
-                successRate: doctor.successRate,
-                totalPatients: doctor.totalPatients,
+                successRate,
+                totalPatients,
                 active: doctor.status === "active",
             }}
             workingDays={workingDays}
