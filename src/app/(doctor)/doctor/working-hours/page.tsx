@@ -1,6 +1,7 @@
 import connectDB from "@/lib/mongodb"
 import { requireDoctor } from "@/lib/doctor-session"
 import DoctorScheduleRequest from "@/models/DoctorScheduleRequest"
+import ClinicHours from "@/models/ClinicHours"
 import { normalizeWeek } from "@/lib/schedule"
 import { NoProfile } from "../no-profile"
 import {
@@ -18,6 +19,13 @@ export default async function DoctorWorkingHoursPage() {
     }
 
     await connectDB()
+
+    const clinicHoursDoc = await ClinicHours.findOne({ key: "clinic" })
+        .select("hours createdAt version")
+        .lean()
+    const clinicHoursVersion = clinicHoursDoc
+        ? `${new Date(clinicHoursDoc.createdAt).toISOString()}:${clinicHoursDoc.version ?? 0}`
+        : "default"
 
     const requestDocs = await DoctorScheduleRequest.find({
         doctor: doctor._id,
@@ -38,6 +46,9 @@ export default async function DoctorWorkingHoursPage() {
     return (
         <WorkingHoursManager
             currentSchedule={normalizeWeek(doctor.schedule)}
+            clinicSchedule={normalizeWeek(clinicHoursDoc?.hours)}
+            clinicHoursVersion={clinicHoursVersion}
+            acknowledgedClinicHoursVersion={doctor.clinicHoursAcknowledgedVersion ?? ""}
             requests={requests}
         />
     )

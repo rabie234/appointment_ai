@@ -16,6 +16,8 @@ export interface IDoctor extends Document {
   // The doctor's weekly availability *within* the clinic. `closed` on a day
   // means the doctor is off that day. Kept within clinic hours at write time.
   schedule: DayHours[];
+  /** Clinic-hours version the doctor last acknowledged. */
+  clinicHoursAcknowledgedVersion: string;
   status: 'active' | 'inactive';
   availability: 'available' | 'on-leave';
   joinedDate: Date;
@@ -93,6 +95,10 @@ const DoctorSchema = new Schema<IDoctor>(
         ),
       ],
       default: defaultWeek,
+    },
+    clinicHoursAcknowledgedVersion: {
+      type: String,
+      default: '',
     },
     status: {
       type: String,

@@ -9,6 +9,7 @@ import { type DayHours, defaultWeek } from '@/lib/schedule';
 export interface IClinicHours extends Document {
   key: string;
   hours: DayHours[];
+  version: number;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -34,6 +35,7 @@ const ClinicHoursSchema = new Schema<IClinicHours>(
       type: [DayHoursSchema],
       default: defaultWeek,
     },
+    version: { type: Number, default: 0 },
   },
   { timestamps: true }
 );

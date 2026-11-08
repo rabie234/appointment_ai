@@ -4,6 +4,7 @@ import { revalidatePath } from 'next/cache';
 import connectDB from '@/lib/mongodb';
 import { requireDoctor } from '@/lib/doctor-session';
 import { getClinicHours } from '@/lib/clinic-hours';
+import ClinicHours from '@/models/ClinicHours';
 import { validateAgainstClinic, validateWeek, weekFromFormData } from '@/lib/schedule';
 import User from '@/models/User';
 import DoctorScheduleRequest from "@/models/DoctorScheduleRequest"
@@ -122,6 +123,24 @@ export async function requestMyScheduleChange(
     success: "Schedule-change request submitted for admin approval.",
   }
 }
+/** Record that the signed-in doctor reviewed this exact clinic-hours version. */
+export async function acknowledgeClinicHours(): Promise<void> {
+  const { doctor } = await requireDoctor();
+  if (!doctor) return;
+
+  await connectDB();
+  const clinicHours = await ClinicHours.findOne({ key: 'clinic' })
+    .select('createdAt version')
+    .lean();
+  const version = clinicHours
+    ? `${new Date(clinicHours.createdAt).toISOString()}:${clinicHours.version ?? 0}`
+    : 'default';
+
+  doctor.clinicHoursAcknowledgedVersion = version;
+  await doctor.save();
+  revalidatePath('/doctor/working-hours');
+}
+
 export async function changeMyPassword(
   _prev: AccountFormState,
   formData: FormData

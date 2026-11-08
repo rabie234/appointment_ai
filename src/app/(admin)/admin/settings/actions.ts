@@ -39,7 +39,7 @@ export async function updateClinicHours(
   try {
     await ClinicHours.findOneAndUpdate(
       { key: 'clinic' },
-      { key: 'clinic', hours: week },
+      { $set: { key: 'clinic', hours: week }, $inc: { version: 1 } },
       { upsert: true, new: true, setDefaultsOnInsert: true }
     );
 
