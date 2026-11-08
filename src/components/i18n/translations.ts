@@ -638,6 +638,21 @@ const translations = {
     "Notification body: An approved leave period was cancelled by the clinic.": "ألغت العيادة فترة إجازة معتمدة.",
     "Notification: Leave scheduled by clinic": "تمت جدولة الإجازة من قبل العيادة.",
     "Notification body: The clinic scheduled an approved leave period for you.": "جدولت العيادة فترة إجازة معتمدة لك.",
+   "Clinic Hours Alert": "تنبيه: تغيير ساعات المركز",
+
+"Your appointment is affected by a change in clinic opening hours. Please choose another available time or cancel the appointment.":
+    "تأثر موعدك بسبب تغيير ساعات عمل المركز. يرجى اختيار موعد آخر متاح أو إلغاء الموعد.",
+
+"This appointment is affected by a change in clinic opening hours. Please contact the administration or patient to arrange an alternative appointment.":
+    "هذا الموعد متأثر بتغيير ساعات عمل المركز. يرجى التواصل مع الإدارة أو المريض لتنسيق موعد بديل.",
+   "Notification: Appointment affected by clinic hours change":
+    "تنبيه: تأثر الموعد بتغيير ساعات المركز",
+
+"Notification body: Your appointment is outside the new clinic opening hours. Please reschedule it.":
+    "موعدك أصبح خارج ساعات عمل المركز الجديدة. يرجى إعادة جدولة الموعد.",
+
+"Notification body: An appointment on your schedule is outside the new clinic opening hours.":
+    "أحد المواعيد في جدولك أصبح خارج ساعات عمل المركز الجديدة.",
     "You already have an active appointment in this specialty. Finish or cancel it before booking another.": "لديك موعد قائم بالفعل في هذا الاختصاص. انتظر اكتمال الموعد أو ألغِه قبل حجز موعد آخر.",
 } as const;
 

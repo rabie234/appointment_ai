@@ -19,6 +19,7 @@ export interface IAppointment extends Document {
     cancellationReason?: string
     leaveConflict?: boolean
     scheduleChangeRequestId?: mongoose.Types.ObjectId
+    clinicHoursConflict?: boolean;
     startedAt?: Date
     completedAt?: Date
     createdAt: Date
@@ -78,6 +79,10 @@ const AppointmentSchema = new Schema<IAppointment>(
             type: Boolean,
             default: false,
         },
+        clinicHoursConflict: {
+            type: Boolean,
+            default: false,
+            },
         scheduleChangeRequestId: {
             type: Schema.Types.ObjectId,
             ref: "DoctorScheduleRequest",

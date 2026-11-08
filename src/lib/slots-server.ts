@@ -1,8 +1,10 @@
 import connectDB from '@/lib/mongodb';
-import { availableSlots, normalizeWeek, type DayHours } from '@/lib/schedule';
+import { availableSlots, normalizeWeek,  type DayHours } from '@/lib/schedule';
 import Doctor from '@/models/Doctor';
 import Appointment from '@/models/Appointment';
 import DoctorLeave from "@/models/DoctorLeave"
+import { getClinicHours } from '@/lib/clinic-hours';
+import { intersectSchedules } from '@/lib/schedule';
 /**
  * Server-side slot helpers shared by the patient booking flow, the admin
  * appointment creator, and the AI assistant tools — so the "what's free?" logic
@@ -71,7 +73,17 @@ const leave = await DoctorLeave.exists({
 })
 
 if (leave) return { slots: [] }
-  const schedule: DayHours[] = normalizeWeek(doctor.schedule);
-  const taken = await bookedTimes(doctorId, date);
-  return { slots: availableSlots(schedule, date, taken) };
+ const doctorSchedule: DayHours[] = normalizeWeek(doctor.schedule);
+const clinicSchedule = await getClinicHours();
+
+const effectiveSchedule = intersectSchedules(
+  doctorSchedule,
+  clinicSchedule
+);
+
+const taken = await bookedTimes(doctorId, date);
+
+return {
+  slots: availableSlots(effectiveSchedule, date, taken),
+};
 }

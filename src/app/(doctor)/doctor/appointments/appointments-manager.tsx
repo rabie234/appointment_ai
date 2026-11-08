@@ -1,3 +1,4 @@
+
 "use client"
 
 import { useState } from "react"
@@ -22,6 +23,7 @@ import {
     LogOut,
     Mail,
     Phone,
+    AlertTriangle,
 } from "lucide-react"
 
 export type DoctorAppointment = {
@@ -47,6 +49,7 @@ export type DoctorAppointment = {
     startedAt?: string
     completedAt?: string
     cancellationReason: string
+    clinicHoursConflict?: boolean
 }
 
 const TABS = [
@@ -121,6 +124,19 @@ function formatCount(value: number, language: "en" | "ar"): string {
     }).format(value)
 }
 
+function ClinicHoursWarning({ language }: { language: "en" | "ar" }) {
+    return (
+        <div className="mt-2 flex items-start gap-2 rounded-lg border border-amber-500/30 bg-amber-500/10 p-3 text-sm text-amber-700 dark:text-amber-400">
+            <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
+            <p>
+                {language === "ar"
+                    ? "هذا الموعد متأثر بتغيير ساعات عمل المركز. يرجى التواصل مع الإدارة أو المريض لتنسيق موعد بديل."
+                    : "This appointment is affected by a change in clinic opening hours. Please contact the administration or patient to arrange an alternative appointment."}
+            </p>
+        </div>
+    )
+}
+
 export function DoctorAppointmentsManager({
     doctorName,
     appointments,
@@ -134,7 +150,8 @@ export function DoctorAppointmentsManager({
     const [search, setSearch] = useState("")
 
     const term = search.trim().toLowerCase()
-    const inTab = (key: string) => appointments.filter((appointment) => appointment.tab === key)
+    const inTab = (key: string) =>
+        appointments.filter((appointment) => appointment.tab === key)
 
     // Today and upcoming read soonest-first; history reads newest-first.
     const visible = inTab(tab)
@@ -207,13 +224,12 @@ export function DoctorAppointmentsManager({
                 </div>
             </div>
 
+            {/* Desktop table */}
             <div className="hidden overflow-hidden rounded-2xl border bg-card/60 shadow-sm backdrop-blur-sm md:block">
                 <Table>
                     <TableHeader>
                         <TableRow className="border-muted/50 bg-muted/30 hover:bg-transparent">
-                            <TableHead
-                                className={cn("pl-6", isArabic && "text-center")}
-                            >
+                            <TableHead className={cn("pl-6", isArabic && "text-center")}>
                                 {t(language, "Patient")}
                             </TableHead>
                             <TableHead>{t(language, "Date & Time")}</TableHead>
@@ -243,12 +259,7 @@ export function DoctorAppointmentsManager({
                                     key={appointment.id}
                                     className="group align-top border-muted/30 transition-colors hover:bg-accent/40"
                                 >
-                                    <TableCell
-                                        className={cn(
-                                            "pl-6",
-                                            isArabic && "text-center"
-                                        )}
-                                    >
+                                    <TableCell className={cn("pl-6", isArabic && "text-center")}>
                                         <span className="block font-bold">
                                             {appointment.patient}
                                         </span>
@@ -284,8 +295,7 @@ export function DoctorAppointmentsManager({
                                             {appointment.time} – {appointment.endTime}
                                         </span>
 
-                                        {(appointment.startedAt ||
-                                            appointment.completedAt) && (
+                                        {(appointment.startedAt || appointment.completedAt) && (
                                             <span className="mt-1 flex flex-col gap-0.5 text-[11px] font-normal text-muted-foreground">
                                                 {appointment.startedAt && (
                                                     <span className="flex items-center gap-1">
@@ -325,6 +335,10 @@ export function DoctorAppointmentsManager({
                                             {t(language, STATUS_LABEL[appointment.status])}
                                         </Badge>
 
+                                        {appointment.clinicHoursConflict && (
+                                            <ClinicHoursWarning language={language} />
+                                        )}
+
                                         {appointment.status === "cancelled" &&
                                             appointment.cancellationReason && (
                                                 <p className="mt-1 max-w-[14rem] text-xs text-destructive">
@@ -342,6 +356,7 @@ export function DoctorAppointmentsManager({
                 </Table>
             </div>
 
+            {/* Mobile cards */}
             <div className="space-y-3 md:hidden">
                 {visible.length === 0 ? (
                     <p className="rounded-2xl border bg-card/60 py-12 text-center text-sm text-muted-foreground">
@@ -377,6 +392,10 @@ export function DoctorAppointmentsManager({
                                     {t(language, STATUS_LABEL[appointment.status])}
                                 </Badge>
                             </div>
+
+                            {appointment.clinicHoursConflict && (
+                                <ClinicHoursWarning language={language} />
+                            )}
 
                             <div className="flex flex-wrap items-center justify-between gap-2 text-sm">
                                 <span className="font-medium">

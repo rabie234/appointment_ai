@@ -32,6 +32,7 @@ export type AppointmentCard = {
     id: string
     doctorId: string
     leaveConflict: boolean
+    clinicHoursConflict?: boolean
     scheduleChangeRequested: boolean
     doctor: string
     doctorAr: string
@@ -173,8 +174,8 @@ export function AppointmentsList({
     async function handleCancelLeaveConflict(appointmentId: string) {
         const confirmed = window.confirm(
             isArabic
-                ? "هل تريدين إلغاء هذا الموعد المتأثر بإجازة الطبيب؟"
-                : "Cancel this appointment affected by the doctor's leave?"
+                ? "هل تريدين إلغاء هذا الموعد المتأثر؟"
+                : "Do you want to cancel this affected appointment?"
         )
 
         if (!confirmed) return
@@ -383,7 +384,7 @@ export function AppointmentsList({
                                             app.tab === "Completed" && "bg-emerald-500",
                                             app.tab === "Cancelled" && "bg-destructive",
                                             app.tab === "Missed" && "bg-orange-500",
-                                            (app.leaveConflict || app.scheduleChangeRequested) &&
+                                            (app.leaveConflict || app.clinicHoursConflict || app.scheduleChangeRequested) &&
     app.tab === "Upcoming" &&
     "bg-destructive"
                                         )}
@@ -415,18 +416,22 @@ export function AppointmentsList({
                                                         {t(language, app.statusLabel)}
                                                     </Badge>
 
-                                             {(app.leaveConflict || app.scheduleChangeRequested) &&
+                                             {(app.leaveConflict || app.clinicHoursConflict || app.scheduleChangeRequested) &&
     app.tab === "Upcoming" && (
         <Badge
             variant="destructive"
             className="gap-1"
         >
             <AlertTriangle className="h-3.5 w-3.5" />
-            {app.scheduleChangeRequested
-                ? t(language, "Schedule change request")
-                : isArabic
-                  ? "تنبيه: إجازة الطبيب"
-                  : "Doctor Leave Alert"}
+            {app.clinicHoursConflict
+                ? isArabic
+                    ? "تنبيه: تغيير ساعات المركز"
+                    : "Clinic Hours Alert"
+                : app.scheduleChangeRequested
+                    ? t(language, "Schedule change request")
+                    : isArabic
+                        ? "تنبيه: إجازة الطبيب"
+                        : "Doctor Leave Alert"}
         </Badge>
     )}
                                                 </div>
@@ -487,18 +492,22 @@ export function AppointmentsList({
                                                     </div>
                                                 </div>
 
-                                                {(app.leaveConflict || app.scheduleChangeRequested) &&
+                                                {(app.leaveConflict || app.clinicHoursConflict || app.scheduleChangeRequested) &&
     app.tab === "Upcoming" && (
                                                         <div className="mt-4 rounded-lg border border-destructive/30 bg-destructive/5 p-4">
                                                           <p className="text-sm text-destructive">
-    {app.scheduleChangeRequested
-        ? t(
-              language,
-              "Your doctor requested a working-hours change that affects this appointment. Choose a new time from the proposed hours. Your current appointment will remain unchanged until you confirm."
-          )
-        : isArabic
-          ? "هذا الموعد متأثر بإجازة الطبيب. يمكنك اختيار موعد آخر متاح أو إلغاء الموعد."
-          : "This appointment is affected by the doctor's leave. Choose another available time or cancel the appointment."}
+    {app.clinicHoursConflict
+        ? isArabic
+            ? "تأثر موعدك بسبب تغيير ساعات عمل المركز. يرجى اختيار موعد آخر متاح أو إلغاء الموعد."
+            : "Your appointment is affected by a change in clinic opening hours. Please choose another available time or cancel the appointment."
+        : app.scheduleChangeRequested
+            ? t(
+                  language,
+                  "Your doctor requested a working-hours change that affects this appointment. Choose a new time from the proposed hours. Your current appointment will remain unchanged until you confirm."
+              )
+            : isArabic
+                ? "هذا الموعد متأثر بإجازة الطبيب. يمكنك اختيار موعد آخر متاح أو إلغاء الموعد."
+                : "This appointment is affected by the doctor's leave. Choose another available time or cancel the appointment."}
 </p>
 
                                                             <div className="mt-3 flex flex-wrap gap-2">
@@ -515,8 +524,8 @@ export function AppointmentsList({
                                                                     {app.scheduleChangeRequested
     ? t(language, "Choose a new time")
     : isArabic
-      ? "إعادة جدولة"
-      : "Reschedule"}
+        ? "إعادة جدولة"
+        : "Reschedule"}
                                                                 </Button>
 
                                                                 <Button
@@ -667,6 +676,7 @@ export function AppointmentsList({
                                             {(app.statusLabel === "Pending" ||
                                                     app.statusLabel === "Confirmed") &&
                                                     !app.leaveConflict &&
+                                                    !app.clinicHoursConflict &&
                                                     !app.scheduleChangeRequested && (
                                                     <button
                                                         type="button"

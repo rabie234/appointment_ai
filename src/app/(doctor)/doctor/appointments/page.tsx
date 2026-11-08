@@ -1,3 +1,4 @@
+
 import { cookies } from "next/headers"
 import connectDB from "@/lib/mongodb"
 import { requireDoctor } from "@/lib/doctor-session"
@@ -102,6 +103,9 @@ export default async function DoctorAppointmentsPage() {
             startedAt: stampTime(appointment.startedAt, locale),
             completedAt: stampTime(appointment.completedAt, locale),
             cancellationReason: appointment.cancellationReason ?? "",
+
+            // Indicates that this appointment falls outside the updated clinic hours.
+            clinicHoursConflict: appointment.clinicHoursConflict ?? false,
         }
     })
 

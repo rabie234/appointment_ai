@@ -9,6 +9,7 @@ import {
   normalizeWeek,
   slotsForDay,
   dayOfWeek,
+  intersectSchedules,
 } from "@/lib/schedule"
 import Doctor from "@/models/Doctor"
 import Appointment from "@/models/Appointment"
@@ -21,6 +22,7 @@ import {
   type ActiveSpecialtyAppointment,
 } from "@/lib/booking-policy"
 import { notifyAdmins, notifyUser } from "@/lib/notification-service"
+import { getClinicHours } from "@/lib/clinic-hours";
 /** The UTC start and exclusive end of a day. */
 function dayBounds(date: Date): { start: Date; end: Date } {
   const start = new Date(date)
@@ -97,6 +99,7 @@ export async function getAvailableSlots(
     .select("schedule status")
     .lean()
 
+
   if (!doctor) return { error: "Doctor not found" }
   if (doctor.status !== "active") return { slots: [] }
 
@@ -110,7 +113,12 @@ export async function getAvailableSlots(
     if (!mongoose.Types.ObjectId.isValid(appointmentId)) {
       return { slots: [], error: "Invalid appointment" }
     }
+const clinicSchedule = await getClinicHours();
 
+schedule = intersectSchedules(
+  schedule,
+  clinicSchedule
+);
     const appointment = await Appointment.findOne({
       _id: appointmentId,
       patient: session.user.id,
@@ -270,9 +278,16 @@ export async function bookAppointment(
     }
   }
 
-  const schedule = normalizeWeek(doctor.schedule)
-  const day = dayOfWeek(date)
-  const entry = schedule.find((item) => item.day === day)
+ const doctorSchedule = normalizeWeek(doctor.schedule);
+const clinicSchedule = await getClinicHours();
+
+const effectiveSchedule = intersectSchedules(
+  doctorSchedule,
+  clinicSchedule
+);
+
+const day = dayOfWeek(date);
+const entry = effectiveSchedule.find((item) => item.day === day);
 
   if (!entry || entry.closed || !slotsForDay(entry).includes(time)) {
     return { error: "The doctor is not available at that time" }

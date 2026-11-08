@@ -59,9 +59,9 @@ export default async function MyAppointmentsPage() {
 
     const docs = await Appointment.find({ patient: session.user.id })
         .populate<{ doctor: PopulatedDoctor }>(
-    "doctor",
-    "name nameAr specialty"
-)
+            "doctor",
+            "name nameAr specialty"
+        )
         .sort({ date: -1, time: -1 })
         .lean()
 
@@ -71,8 +71,11 @@ export default async function MyAppointmentsPage() {
         return {
             id: String(a._id),
             doctorId: String(a.doctor?._id ?? a.doctor),
+
             leaveConflict: a.leaveConflict ?? false,
+            clinicHoursConflict: a.clinicHoursConflict ?? false,
             scheduleChangeRequested: Boolean(a.scheduleChangeRequestId),
+
             doctor: a.doctor?.name ?? "Unknown doctor",
             doctorAr: a.doctor?.nameAr ?? "",
             specialty: a.doctor?.specialty ?? "",

@@ -126,6 +126,59 @@ export function validateAgainstClinic(
   }
   return { ok: true };
 }
+/**
+ * Calculate the effective doctor schedule by intersecting
+ * the doctor's own availability with the clinic's opening hours.
+ *
+ * The original doctor schedule is never modified.
+ */
+export function intersectSchedules(
+  doctorSchedule: DayHours[],
+  clinicSchedule: DayHours[]
+): DayHours[] {
+  const clinicByDay = new Map(
+    clinicSchedule.map((entry) => [entry.day, entry])
+  );
+
+  return doctorSchedule.map((doctorDay) => {
+    const clinicDay = clinicByDay.get(doctorDay.day);
+
+    if (
+      doctorDay.closed ||
+      !clinicDay ||
+      clinicDay.closed
+    ) {
+      return {
+        ...doctorDay,
+        closed: true,
+      };
+    }
+
+    const openMinutes = Math.max(
+      toMinutes(doctorDay.open),
+      toMinutes(clinicDay.open)
+    );
+
+    const closeMinutes = Math.min(
+      toMinutes(doctorDay.close),
+      toMinutes(clinicDay.close)
+    );
+
+    if (openMinutes >= closeMinutes) {
+      return {
+        ...doctorDay,
+        closed: true,
+      };
+    }
+
+    return {
+      ...doctorDay,
+      open: minutesToTime(openMinutes),
+      close: minutesToTime(closeMinutes),
+      closed: false,
+    };
+  });
+}
 
 /** Default appointment slot length, in minutes. */
 export const SLOT_MINUTES = 30;

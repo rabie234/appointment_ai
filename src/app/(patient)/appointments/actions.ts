@@ -14,8 +14,9 @@ import {
     isValidTime,
     normalizeWeek,
     slotsForDay,
+    intersectSchedules,
 } from "@/lib/schedule"
-
+import { getClinicHours } from "@/lib/clinic-hours";
 export async function cancelPatientAppointment(appointmentId: string) {
     try {
         const session = await requireRole("patient")
@@ -40,6 +41,7 @@ export async function cancelPatientAppointment(appointmentId: string) {
                     status: "cancelled",
                     cancellationReason: "Cancelled by you",
                     leaveConflict: false,
+                    clinicHoursConflict: false,
                 },
                 $unset: {
                     scheduleChangeRequestId: "",
@@ -115,6 +117,7 @@ export async function cancelLeaveConflictAppointment(
                 patient: session.user.id,
                 status: { $in: ["pending", "confirmed"] },
                 $or: [
+                    { clinicHoursConflict: true },
                     { leaveConflict: true },
                     {
                         scheduleChangeRequestId: {
@@ -309,8 +312,15 @@ export async function rescheduleLeaveConflictAppointment(
             }
         }
 
-        const day = dayOfWeek(date)
-        const entry = schedule.find((item) => item.day === day)
+       const clinicSchedule = await getClinicHours();
+
+const effectiveSchedule = intersectSchedules(
+    schedule,
+    clinicSchedule
+);
+
+const day = dayOfWeek(date);
+const entry = effectiveSchedule.find((item) => item.day === day);
 
         if (!entry || entry.closed || !slotsForDay(entry).includes(time)) {
             return {
@@ -339,6 +349,7 @@ export async function rescheduleLeaveConflictAppointment(
         appointment.date = date
         appointment.time = time
         appointment.leaveConflict = false
+        appointment.clinicHoursConflict = false;
         appointment.scheduleChangeRequestId = undefined
         await appointment.save()
 
