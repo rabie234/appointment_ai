@@ -28,7 +28,7 @@ type DoctorData = {
     rating: number
     reviews: number
     experience: string | number
-    successRate: number
+    successRate: number | null
     totalPatients: number
     active: boolean
 }
@@ -217,7 +217,7 @@ export default function DoctorProfileDisplay({
                             icon={<Award className="h-5 w-5" />}
                             tone="emerald"
                             label="Success Rate"
-                            value={`${doctor.successRate}%`}
+                            value={doctor.successRate === null ? "N/A" : `${doctor.successRate}%`}
                             language={language}
                         />
 

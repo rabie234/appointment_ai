@@ -16,7 +16,7 @@ import {
     slotsForDay,
 } from "@/lib/schedule"
 
-export async function cancelPendingAppointment(appointmentId: string) {
+export async function cancelPatientAppointment(appointmentId: string) {
     try {
         const session = await requireRole("patient")
 
@@ -33,12 +33,13 @@ export async function cancelPendingAppointment(appointmentId: string) {
             {
                 _id: appointmentId,
                 patient: session.user.id,
-                status: "pending",
+                status: { $in: ["pending", "confirmed"] },
             },
             {
                 $set: {
                     status: "cancelled",
                     cancellationReason: "Cancelled by you",
+                    leaveConflict: false,
                 },
                 $unset: {
                     scheduleChangeRequestId: "",

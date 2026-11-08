@@ -4,7 +4,7 @@
 import { useState, useTransition } from "react"
 import { useRouter } from "next/navigation"
 import {
-    cancelPendingAppointment,
+    cancelPatientAppointment,
     cancelLeaveConflictAppointment,
     rescheduleLeaveConflictAppointment,
 } from "./actions"
@@ -148,7 +148,7 @@ export function AppointmentsList({
 
         startTransition(async () => {
             try {
-                const result = await cancelPendingAppointment(appointmentId)
+                const result = await cancelPatientAppointment(appointmentId)
 
                if (!result.success) {
     window.alert(
@@ -664,9 +664,10 @@ export function AppointmentsList({
                                                 {app.price}
                                             </span>
 
-                                            {app.statusLabel === "Pending" &&
-                                                        !app.leaveConflict &&
-                                                        !app.scheduleChangeRequested && (
+                                            {(app.statusLabel === "Pending" ||
+                                                    app.statusLabel === "Confirmed") &&
+                                                    !app.leaveConflict &&
+                                                    !app.scheduleChangeRequested && (
                                                     <button
                                                         type="button"
                                                         onClick={() =>
