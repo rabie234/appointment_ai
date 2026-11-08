@@ -8,8 +8,9 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { useLanguage } from "@/components/i18n/language-provider"
 import { t } from "@/components/i18n/translations"
 import { WeekEditor } from "@/components/schedule/week-editor"
-import type { DayHours } from "@/lib/schedule"
+import { toMinutes, type DayHours } from "@/lib/schedule"
 import {
+    acknowledgeClinicHours,
     requestMyScheduleChange,
     type AccountFormState,
 } from "../account/actions"
@@ -72,9 +73,15 @@ function ScheduleFeedback({
 
 export function WorkingHoursManager({
     currentSchedule,
+    clinicSchedule,
+    clinicHoursVersion,
+    acknowledgedClinicHoursVersion,
     requests,
 }: {
     currentSchedule: DayHours[]
+    clinicSchedule: DayHours[]
+    clinicHoursVersion: string
+    acknowledgedClinicHoursVersion: string
     requests: ScheduleChangeRequestView[]
 }) {
     const { language } = useLanguage()
@@ -88,6 +95,23 @@ export function WorkingHoursManager({
             {}
         )
 
+    const clinicByDay = new Map(clinicSchedule.map((day) => [day.day, day]))
+    const conflictAt = (day: DayHours) => {
+        const clinicDay = clinicByDay.get(day.day)
+        if (day.closed) return { open: false, close: false }
+        if (!clinicDay || clinicDay.closed) return { open: true, close: true }
+        return {
+            open: toMinutes(day.open) < toMinutes(clinicDay.open),
+            close: toMinutes(day.close) > toMinutes(clinicDay.close),
+        }
+    }
+    const hasClinicHoursConflict = currentSchedule.some((day) => {
+        const conflict = conflictAt(day)
+        return conflict.open || conflict.close
+    })
+    const showConflictStars =
+        hasClinicHoursConflict &&
+        clinicHoursVersion !== acknowledgedClinicHoursVersion
     const dateFormatter = new Intl.DateTimeFormat(
         language === "ar" ? "ar-LB" : "en-US",
         { year: "numeric", month: "short", day: "numeric" }
@@ -107,6 +131,52 @@ export function WorkingHoursManager({
                 </p>
             </div>
 
+            <div className="grid gap-4 lg:grid-cols-2">
+                <Card className="bg-card/60">
+                    <CardHeader><CardTitle className="text-xl">{t(language, "Saved doctor working hours")}</CardTitle></CardHeader>
+                    <CardContent className="space-y-2">
+                        {currentSchedule.map((day) => {
+                            const conflict = conflictAt(day)
+                            return (
+                                <div key={day.day} className="flex justify-between gap-3 text-sm">
+                                    <span>{t(language, day.day)}</span>
+                                    <span className="tabular-nums">
+                                        {day.closed ? t(language, "Off") : (
+                                            <>
+                                                {day.open}{showConflictStars && conflict.open && <span aria-hidden="true" className="ml-1 text-xs font-bold text-red-600">*</span>}
+                                                –{day.close}{showConflictStars && conflict.close && <span aria-hidden="true" className="ml-1 text-xs font-bold text-red-600">*</span>}
+                                            </>
+                                        )}
+                                    </span>
+                                </div>
+                            )
+                        })}
+                    </CardContent>
+                </Card>
+                <Card className="bg-card/60">
+                    <CardHeader><CardTitle className="text-xl">{t(language, "Current clinic hours")}</CardTitle></CardHeader>
+                    <CardContent className="space-y-2">
+                        {clinicSchedule.map((day) => (
+                            <div key={day.day} className="flex justify-between gap-3 text-sm">
+                                <span>{t(language, day.day)}</span>
+                                <span className="tabular-nums">{day.closed ? t(language, "Off") : day.open + "–" + day.close}</span>
+                            </div>
+                        ))}
+                    </CardContent>
+                </Card>
+            </div>
+            {hasClinicHoursConflict && (
+                <div className="space-y-3 rounded-md border border-amber-300 bg-amber-50 p-4 text-sm text-amber-950 dark:border-amber-900 dark:bg-amber-950/30 dark:text-amber-100">
+                    <p>{t(language, "Your saved working hours extend beyond the current clinic hours. The red star marks the conflicting time. Reviewing this update does not change your schedule.")}</p>
+                    {showConflictStars ? (
+                        <form action={acknowledgeClinicHours}>
+                            <SubmitButton>{t(language, "I Reviewed the Updated Clinic Hours")}</SubmitButton>
+                        </form>
+                    ) : (
+                        <p className="font-medium">{t(language, "You reviewed the current clinic hours. Your saved schedule is unchanged.")}</p>
+                    )}
+                </div>
+            )}
             <Card className="border-none bg-card/60 shadow-sm">
                 <CardHeader>
                     <CardTitle className="text-xl">

@@ -654,6 +654,11 @@ const translations = {
 "Notification body: An appointment on your schedule is outside the new clinic opening hours.":
     "أحد المواعيد في جدولك أصبح خارج ساعات عمل المركز الجديدة.",
     "You already have an active appointment in this specialty. Finish or cancel it before booking another.": "لديك موعد قائم بالفعل في هذا الاختصاص. انتظر اكتمال الموعد أو ألغِه قبل حجز موعد آخر.",
+    "Saved doctor working hours": "ساعات عمل الطبيب المحفوظة",
+    "Current clinic hours": "ساعات المركز الحالية",
+    "Your saved working hours extend beyond the current clinic hours. The red star marks the conflicting time. Reviewing this update does not change your schedule.": "تمتد ساعات عملك المحفوظة إلى ما بعد ساعات المركز الحالية. تشير النجمة الحمراء إلى الوقت المتعارض. مراجعة هذا التحديث لا تغيّر جدولك.",
+    "I Reviewed the Updated Clinic Hours": "اطّلعت على ساعات المركز المحدّثة",
+    "You reviewed the current clinic hours. Your saved schedule is unchanged.": "اطّلعت على ساعات المركز الحالية. لم يتغير جدولك المحفوظ.",
 } as const;
 
 export function t(language: Language, text: string): string {
