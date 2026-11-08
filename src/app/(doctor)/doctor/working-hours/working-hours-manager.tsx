@@ -109,9 +109,6 @@ export function WorkingHoursManager({
         const conflict = conflictAt(day)
         return conflict.open || conflict.close
     })
-    const showConflictStars =
-        hasClinicHoursConflict &&
-        clinicHoursVersion !== acknowledgedClinicHoursVersion
     const dateFormatter = new Intl.DateTimeFormat(
         language === "ar" ? "ar-LB" : "en-US",
         { year: "numeric", month: "short", day: "numeric" }
@@ -143,8 +140,8 @@ export function WorkingHoursManager({
                                     <span className="tabular-nums">
                                         {day.closed ? t(language, "Off") : (
                                             <>
-                                                {day.open}{showConflictStars && conflict.open && <span aria-hidden="true" className="ml-1 text-xs font-bold text-red-600">*</span>}
-                                                –{day.close}{showConflictStars && conflict.close && <span aria-hidden="true" className="ml-1 text-xs font-bold text-red-600">*</span>}
+                                                {day.open}{hasClinicHoursConflict && conflict.open && <span aria-hidden="true" className="ml-1 text-xs font-bold text-red-600">*</span>}
+                                                –{day.close}{hasClinicHoursConflict && conflict.close && <span aria-hidden="true" className="ml-1 text-xs font-bold text-red-600">*</span>}
                                             </>
                                         )}
                                     </span>
@@ -165,16 +162,18 @@ export function WorkingHoursManager({
                     </CardContent>
                 </Card>
             </div>
+            {!hasClinicHoursConflict &&
+                clinicHoursVersion === acknowledgedClinicHoursVersion && (
+                    <p className="rounded-md bg-emerald-50 px-4 py-3 text-sm text-emerald-800 dark:bg-emerald-900/20 dark:text-emerald-300">
+                        {t(language, "Current clinic hours were applied to your saved schedule. You can request changes below.")}
+                    </p>
+                )}
             {hasClinicHoursConflict && (
                 <div className="space-y-3 rounded-md border border-amber-300 bg-amber-50 p-4 text-sm text-amber-950 dark:border-amber-900 dark:bg-amber-950/30 dark:text-amber-100">
-                    <p>{t(language, "Your saved working hours extend beyond the current clinic hours. The red star marks the conflicting time. Reviewing this update does not change your schedule.")}</p>
-                    {showConflictStars ? (
-                        <form action={acknowledgeClinicHours}>
-                            <SubmitButton>{t(language, "I Reviewed the Updated Clinic Hours")}</SubmitButton>
-                        </form>
-                    ) : (
-                        <p className="font-medium">{t(language, "You reviewed the current clinic hours. Your saved schedule is unchanged.")}</p>
-                    )}
+                    <p>{t(language, "Your saved working hours extend beyond the current clinic hours. The red star marks the conflicting time. Continuing will replace your saved schedule with the current clinic hours. You can request changes afterward.")}</p>
+                    <form action={acknowledgeClinicHours}>
+                        <SubmitButton>{t(language, "I Reviewed and Apply Clinic Hours")}</SubmitButton>
+                    </form>
                 </div>
             )}
             <Card className="border-none bg-card/60 shadow-sm">
