@@ -20,6 +20,10 @@ export function NotificationsBell() {
     const [items, setItems] = useState<NotificationView[]>([])
     const [unreadCount, setUnreadCount] = useState(0)
 
+    function notificationText(key: string) {
+        return t(language, key).replace(/^Notification(?: body)?:\s*/i, "")
+    }
+
     async function refreshNotifications() {
         try {
             const result = await getMyNotifications()
@@ -168,10 +172,10 @@ export function NotificationsBell() {
                                         />
                                         <span className="min-w-0 flex-1">
                                             <span className="block text-sm font-semibold">
-                                                {t(language, item.titleKey)}
+                                                {notificationText(item.titleKey)}
                                             </span>
                                             <span className="mt-1 block text-xs text-muted-foreground">
-                                                {t(language, item.bodyKey)}
+                                                {notificationText(item.bodyKey)}
                                             </span>
                                             {item.context && (
                                                 <span className="mt-1 block text-xs text-muted-foreground">

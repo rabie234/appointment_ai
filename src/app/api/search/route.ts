@@ -10,7 +10,6 @@ export const dynamic = "force-dynamic";
 
 export async function GET(request: NextRequest) {
   try {
-    // 1. Authentication
     const session = await auth();
 
     if (!session?.user) {
@@ -20,15 +19,15 @@ export async function GET(request: NextRequest) {
       );
     }
 
-    // 2. Authorization
-    if (session.user.role !== "admin") {
+    const role = session.user.role;
+
+    if (role !== "admin" && role !== "doctor") {
       return NextResponse.json(
-        { error: "Admin access required." },
+        { error: "Access denied." },
         { status: 403 }
       );
     }
 
-    // 3. Validate search query
     const query = request.nextUrl.searchParams.get("q")?.trim() ?? "";
 
     if (query.length < 2) {
@@ -44,11 +43,104 @@ export async function GET(request: NextRequest) {
 
     await connectDB();
 
-    // 4. Create a safe case-insensitive search pattern
     const escaped = query.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
     const regex = new RegExp(escaped, "i");
 
-    // 5. Search patients and doctors first
+    // DOCTOR SEARCH
+    if (role === "doctor") {
+      const doctor = await Doctor.findOne({
+        user: session.user.id,
+      }).select("_id");
+
+      if (!doctor) {
+        return NextResponse.json(
+          { error: "Doctor profile not found." },
+          { status: 403 }
+        );
+      }
+
+      const patients = await User.find({
+        role: "patient",
+        $or: [
+          { name: regex },
+          { email: regex },
+          { phone: regex },
+        ],
+      })
+        .select("name email phone")
+        .limit(20)
+        .lean();
+
+      const patientIds = patients.map((patient) => patient._id);
+
+      const appointmentConditions: Record<string, unknown>[] = [
+        { status: regex },
+      ];
+
+      if (patientIds.length > 0) {
+        appointmentConditions.push({
+          patient: { $in: patientIds },
+        });
+      }
+
+      const appointments = await Appointment.find({
+        doctor: doctor._id,
+        $or: appointmentConditions,
+      })
+        .populate("patient", "name email phone")
+        .sort({ date: -1 })
+        .limit(20)
+        .lean();
+
+      const matchingPatientIds = new Set(
+        appointments.map((appointment) =>
+          String(
+            typeof appointment.patient === "object" &&
+            appointment.patient !== null
+              ? (appointment.patient as { _id: unknown })._id
+              : appointment.patient
+          )
+        )
+      );
+
+      const results = [
+        ...patients
+          .filter((patient) =>
+            matchingPatientIds.has(String(patient._id))
+          )
+          .slice(0, 5)
+          .map((patient) => ({
+            id: String(patient._id),
+            type: "patient" as const,
+            title: patient.name,
+            subtitle: patient.email ?? patient.phone ?? "",
+            href: "/doctor/appointments",
+          })),
+
+        ...appointments.slice(0, 5).map((appointment) => {
+          const patient = appointment.patient as
+            | { _id: unknown; name?: string }
+            | null;
+
+          return {
+            id: String(appointment._id),
+            type: "appointment" as const,
+            title: patient?.name ?? "Unknown patient",
+            subtitle: "My appointment",
+            status: appointment.status,
+            date: new Date(appointment.date)
+              .toISOString()
+              .slice(0, 10),
+            time: appointment.time,
+            href: "/doctor/appointments",
+          };
+        }),
+      ];
+
+      return NextResponse.json({ results });
+    }
+
+    // ADMIN SEARCH - preserve existing behavior
     const [patients, doctors] = await Promise.all([
       User.find({
         role: "patient",
@@ -75,40 +167,28 @@ export async function GET(request: NextRequest) {
         .lean(),
     ]);
 
-    // 6. Collect matching patient and doctor IDs
     const patientIds = patients.map((patient) => patient._id);
     const doctorIds = doctors.map((doctor) => doctor._id);
 
-    // 7. Build appointment search conditions
     const appointmentConditions = [
       { status: regex },
-
       ...(patientIds.length > 0
         ? [{ patient: { $in: patientIds } }]
         : []),
-
       ...(doctorIds.length > 0
         ? [{ doctor: { $in: doctorIds } }]
         : []),
     ];
 
-    // 8. Search appointments by status, patient, or doctor
     const appointments = await Appointment.find({
       $or: appointmentConditions,
     })
-      .populate({
-        path: "patient",
-        select: "name",
-      })
-      .populate({
-        path: "doctor",
-        select: "name nameAr specialty",
-      })
+      .populate("patient", "name")
+      .populate("doctor", "name nameAr specialty")
       .sort({ date: -1 })
       .limit(20)
       .lean();
 
-    // 9. Prepare global search results
     const results = [
       ...patients.slice(0, 5).map((patient) => ({
         id: String(patient._id),
@@ -126,33 +206,33 @@ export async function GET(request: NextRequest) {
         href: "/admin/doctors",
       })),
 
-      
-...appointments.slice(0, 5).map((appointment) => {
-  const patient = appointment.patient as
-    | { name?: string }
-    | null;
+      ...appointments.slice(0, 5).map((appointment) => {
+        const patient = appointment.patient as
+          | { name?: string }
+          | null;
 
-  const doctor = appointment.doctor as
-    | { name?: string; nameAr?: string; specialty?: string }
-    | null;
+        const doctor = appointment.doctor as
+          | { name?: string }
+          | null;
 
-  return {
-    id: String(appointment._id),
-    type: "appointment" as const,
-    title: patient?.name ?? "Unknown patient",
-    subtitle: doctor?.name ?? "Unknown doctor",
-    status: appointment.status,
-    date: new Date(appointment.date).toISOString().slice(0, 10),
-    time: appointment.time,
-    href: `/admin/appointments?appointmentId=${encodeURIComponent(String(appointment._id))}`,
-  };
-}),
-
+        return {
+          id: String(appointment._id),
+          type: "appointment" as const,
+          title: patient?.name ?? "Unknown patient",
+          subtitle: doctor?.name ?? "Unknown doctor",
+          status: appointment.status,
+          date: new Date(appointment.date)
+            .toISOString()
+            .slice(0, 10),
+          time: appointment.time,
+          href: `/admin/appointments?appointmentId=${encodeURIComponent(String(appointment._id))}`,
+        };
+      }),
     ];
 
     return NextResponse.json({ results });
   } catch (error) {
-    console.error("Admin global search failed:", error);
+    console.error("Global search failed:", error);
 
     return NextResponse.json(
       { error: "Unable to search records." },

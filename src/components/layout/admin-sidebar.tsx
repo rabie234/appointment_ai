@@ -25,12 +25,13 @@ const adminNavItems = [
     { name: "Dashboard", href: "/admin/dashboard", icon: LayoutDashboard },
     { name: "Doctors", href: "/admin/doctors", icon: Users },
     { name: "Doctor Leaves", href: "/admin/doctor-leaves", icon: CalendarOff },
+     { name: "Schedule Requests", href: "/admin/schedule-requests", icon: ClipboardCheck },
     { name: "Appointments", href: "/admin/appointments", icon: Calendar },
     { name: "Patients", href: "/admin/patients", icon: UserRound },
     { name: "AI Training", href: "/admin/ai-training", icon: BrainCircuit },
     { name: "Reports", href: "/admin/reports", icon: BarChart3 },
     { name: "Settings", href: "/admin/settings", icon: Settings },
-    { name: "Schedule Requests", href: "/admin/schedule-requests", icon: ClipboardCheck },
+   
 ]
 
 export function AdminSidebar() {

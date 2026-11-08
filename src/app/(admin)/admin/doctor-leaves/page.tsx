@@ -1,6 +1,8 @@
+
 import connectDB from "@/lib/mongodb"
 import { requireRole } from "@/lib/session"
 import DoctorLeave from "@/models/DoctorLeave"
+import Doctor from "@/models/Doctor"
 import Appointment from "@/models/Appointment"
 import Specialty from "@/models/Specialty"
 import {
@@ -15,15 +17,32 @@ export default async function DoctorLeavesPage() {
     await requireRole("admin")
     await connectDB()
 
+    // Fetch active doctors for the Schedule Leave form.
+    const doctors = await Doctor.find({ status: "active" })
+        .select("_id name nameAr specialty")
+        .sort({ name: 1 })
+        .lean()
+
+    const doctorOptions = doctors.map((doctor) => ({
+        id: String(doctor._id),
+        name: doctor.name,
+        nameAr: doctor.nameAr || "",
+        specialty: doctor.specialty,
+    }))
+
+    // Fetch pending leave requests.
     const pendingDocs = await DoctorLeave.find({ status: "pending" })
         .populate("doctor", "name nameAr specialty")
         .sort({ createdAt: -1 })
         .lean()
+
+    // Fetch rejected leave requests.
     const rejectedDocs = await DoctorLeave.find({ status: "rejected" })
-    .populate("doctor", "name nameAr specialty")
-    .sort({ reviewedAt: -1 })
-    .lean()
-    // Older Admin-created records have no status field; treat them as approved.
+        .populate("doctor", "name nameAr specialty")
+        .sort({ reviewedAt: -1 })
+        .lean()
+
+    // Older Admin-created records without a status are treated as approved.
     const leaveDocs = await DoctorLeave.find({
         $or: [
             { status: "approved" },
@@ -37,49 +56,56 @@ export default async function DoctorLeavesPage() {
     const today = new Date()
     today.setUTCHours(0, 0, 0, 0)
 
+    // Format pending requests.
     const pendingRequests = pendingDocs.map((request) => {
-    const doctor = request.doctor as unknown as {
-        name?: string
-        nameAr?: string
-        specialty?: string
-    } | null
+        const doctor = request.doctor as unknown as {
+            name?: string
+            nameAr?: string
+            specialty?: string
+        } | null
 
-    const endDate = new Date(request.endDate)
-    endDate.setUTCDate(endDate.getUTCDate() - 1)
+        const endDate = new Date(request.endDate)
+        endDate.setUTCDate(endDate.getUTCDate() - 1)
 
-    return {
-        id: String(request._id),
-        doctorName: doctor?.name ?? "Deleted doctor",
-        doctorNameAr: doctor?.nameAr ?? doctor?.name ?? "Deleted doctor",
-        specialty: doctor?.specialty ?? "",
-        startDate: new Date(request.startDate).toISOString().slice(0, 10),
-        endDate: endDate.toISOString().slice(0, 10),
-        reason: request.reason ?? "",
-    }
-})
+        return {
+            id: String(request._id),
+            doctorName: doctor?.name ?? "Deleted doctor",
+            doctorNameAr: doctor?.nameAr ?? doctor?.name ?? "Deleted doctor",
+            specialty: doctor?.specialty ?? "",
+            startDate: new Date(request.startDate)
+                .toISOString()
+                .slice(0, 10),
+            endDate: endDate.toISOString().slice(0, 10),
+            reason: request.reason ?? "",
+        }
+    })
 
-const rejectedRequests = rejectedDocs.map((request) => {
-    const doctor = request.doctor as unknown as {
-        name?: string
-        nameAr?: string
-        specialty?: string
-    } | null
+    // Format rejected requests.
+    const rejectedRequests = rejectedDocs.map((request) => {
+        const doctor = request.doctor as unknown as {
+            name?: string
+            nameAr?: string
+            specialty?: string
+        } | null
 
-    const endDate = new Date(request.endDate)
-    endDate.setUTCDate(endDate.getUTCDate() - 1)
+        const endDate = new Date(request.endDate)
+        endDate.setUTCDate(endDate.getUTCDate() - 1)
 
-    return {
-        id: String(request._id),
-        doctorName: doctor?.name ?? "Deleted doctor",
-        doctorNameAr: doctor?.nameAr ?? doctor?.name ?? "Deleted doctor",
-        specialty: doctor?.specialty ?? "",
-        startDate: new Date(request.startDate).toISOString().slice(0, 10),
-        endDate: endDate.toISOString().slice(0, 10),
-        reason: request.reason ?? "",
-        adminNote: request.adminNote ?? "",
-    }
-})
+        return {
+            id: String(request._id),
+            doctorName: doctor?.name ?? "Deleted doctor",
+            doctorNameAr: doctor?.nameAr ?? doctor?.name ?? "Deleted doctor",
+            specialty: doctor?.specialty ?? "",
+            startDate: new Date(request.startDate)
+                .toISOString()
+                .slice(0, 10),
+            endDate: endDate.toISOString().slice(0, 10),
+            reason: request.reason ?? "",
+            adminNote: request.adminNote ?? "",
+        }
+    })
 
+    // Format approved leave records and their affected appointments.
     const leaves: DoctorLeaveRow[] = await Promise.all(
         leaveDocs.map(async (leave) => {
             const start = new Date(leave.startDate)
@@ -176,7 +202,7 @@ const rejectedRequests = rejectedDocs.map((request) => {
 
     return (
         <div className="space-y-6">
-            <DoctorLeavesHeading />
+            <DoctorLeavesHeading doctors={doctorOptions} />
 
             <DoctorLeavesManager
                 leaves={leaves}

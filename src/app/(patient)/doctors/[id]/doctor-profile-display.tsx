@@ -4,7 +4,6 @@
 import Link from "next/link"
 import type { ReactNode } from "react"
 import { Card, CardContent } from "@/components/ui/card"
-import { Badge } from "@/components/ui/badge"
 import {
     Star,
     MapPin,
@@ -26,7 +25,6 @@ type DoctorData = {
     nameAr: string
     image: string
     specialty: string
-    availability: string
     rating: number
     reviews: number
     experience: string | number
@@ -171,21 +169,6 @@ export default function DoctorProfileDisplay({
                                 <h1 className="text-3xl font-bold tracking-tight">
                                     {doctorName}
                                 </h1>
-
-                                <Badge
-                                    variant={
-                                        doctor.availability === "available"
-                                            ? "success"
-                                            : "secondary"
-                                    }
-                                >
-                                    {t(
-                                        language,
-                                        doctor.availability === "available"
-                                            ? "Available"
-                                            : "On Leave"
-                                    )}
-                                </Badge>
                             </div>
 
                             <p className="text-primary font-semibold text-lg">

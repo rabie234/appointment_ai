@@ -1,3 +1,4 @@
+
 "use client"
 
 import { useActionState, useEffect, useRef, useState } from "react"
@@ -12,7 +13,6 @@ import {
 } from "@/components/ui/table"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
-import { Badge } from "@/components/ui/badge"
 import {
     Plus,
     Search,
@@ -25,7 +25,7 @@ import {
     Stethoscope,
     Loader2,
     CalendarClock,
-    KeyRound
+    KeyRound,
 } from "lucide-react"
 import { WeekEditor } from "@/components/schedule/week-editor"
 import { DAYS, type DayHours } from "@/lib/schedule"
@@ -40,10 +40,6 @@ import {
     type DoctorFormState,
     type SpecialtyFormState,
 } from "./actions"
-import {
-    createDoctorLeave,
-    type LeaveActionState,
-} from "./leave-actions"
 import { useLanguage } from "@/components/i18n/language-provider"
 import { t } from "@/components/i18n/translations"
 
@@ -54,7 +50,6 @@ export type DoctorRow = {
     specialty: string
     email: string
     phone: string
-    /** Whether this doctor can sign in to the doctor area. */
     hasLogin: boolean
     experience: string
     status: "active" | "inactive"
@@ -131,24 +126,23 @@ function DoctorDialog({
                     <input type="hidden" name="id" value={doctor.id} />
                 )}
 
-<Field label={t(language, "Full Name")}>
-    <Input
-        name="name"
-        defaultValue={doctor?.name}
-        placeholder="Dr. Jane Doe"
-        required
-    />
-</Field>
+                <Field label={t(language, "Full Name")}>
+                    <Input
+                        name="name"
+                        defaultValue={doctor?.name}
+                        placeholder="Dr. Jane Doe"
+                        required
+                    />
+                </Field>
 
-<Field label={t(language, "Arabic Name")}>
-    <Input
-        name="nameAr"
-        defaultValue={doctor?.nameAr ?? ""}
-        placeholder="د. أحمد محمد"
-        dir="rtl"
-    />
-</Field>
-
+                <Field label={t(language, "Arabic Name")}>
+                    <Input
+                        name="nameAr"
+                        defaultValue={doctor?.nameAr ?? ""}
+                        placeholder="د. أحمد محمد"
+                        dir="rtl"
+                    />
+                </Field>
 
                 <Field label={t(language, "Specialty")}>
                     <select
@@ -164,8 +158,8 @@ function DoctorDialog({
                         {specialties.map((specialty) => (
                             <option key={specialty.id} value={specialty.name}>
                                 {language === "ar" && specialty.nameAr
-    ? specialty.nameAr
-    : specialty.name}
+                                    ? specialty.nameAr
+                                    : specialty.name}
                             </option>
                         ))}
 
@@ -175,9 +169,12 @@ function DoctorDialog({
                                     specialty.name === doctor.specialty
                             ) && (
                                 <option value={doctor.specialty}>
-                                   {language === "ar"
-    ? specialties.find((s) => s.name === doctor.specialty)?.nameAr || doctor.specialty
-    : doctor.specialty}
+                                    {language === "ar"
+                                        ? specialties.find(
+                                              (s) =>
+                                                  s.name === doctor.specialty
+                                          )?.nameAr || doctor.specialty
+                                        : doctor.specialty}
                                 </option>
                             )}
                     </select>
@@ -210,7 +207,10 @@ function DoctorDialog({
                             type="password"
                             autoComplete="new-password"
                             minLength={6}
-                            placeholder={t(language, "Set one so the doctor can sign in with their email")}
+                            placeholder={t(
+                                language,
+                                "Set one so the doctor can sign in with their email"
+                            )}
                         />
                     </Field>
                 )}
@@ -228,7 +228,9 @@ function DoctorDialog({
                         name="status"
                         defaultValue={doctor?.status ?? "active"}
                     >
-                        <option value="active">{t(language, "Active")}</option>
+                        <option value="active">
+                            {t(language, "Active")}
+                        </option>
                         <option value="inactive">
                             {t(language, "Inactive")}
                         </option>
@@ -251,7 +253,10 @@ function DoctorDialog({
                     </Button>
 
                     <SubmitButton>
-                        {t(language, isEdit ? "Save Changes" : "Add Doctor")}
+                        {t(
+                            language,
+                            isEdit ? "Save Changes" : "Add Doctor"
+                        )}
                     </SubmitButton>
                 </div>
             </form>
@@ -259,18 +264,18 @@ function DoctorDialog({
     )
 }
 
-// Doctor leave modal
-function DoctorLeaveDialog({
-    doctors,
+// Doctor login modal
+function LoginDialog({
+    doctor,
     onClose,
 }: {
-    doctors: DoctorRow[]
+    doctor: DoctorRow
     onClose: () => void
 }) {
     const { language } = useLanguage()
 
-    const [state, formAction] = useActionState<LeaveActionState, FormData>(
-        createDoctorLeave,
+    const [state, formAction] = useActionState<DoctorFormState, FormData>(
+        setDoctorLogin,
         {}
     )
 
@@ -283,21 +288,21 @@ function DoctorLeaveDialog({
             <div className="flex items-center justify-between border-b p-5">
                 <div>
                     <h2 className="text-lg font-bold">
-                        {t(language, "Schedule Doctor Leave")}
-                    </h2>
-
-                    <p className="text-sm text-muted-foreground">
                         {t(
                             language,
-                            "Mark leave dates and flag affected appointments."
+                            doctor.hasLogin
+                                ? "Reset Password"
+                                : "Enable Doctor Login"
                         )}
+                    </h2>
+                    <p className="text-sm text-muted-foreground">
+                        {doctor.name}
                     </p>
                 </div>
 
                 <button
                     type="button"
                     onClick={onClose}
-                    aria-label={t(language, "Close")}
                     className="text-muted-foreground hover:text-foreground"
                 >
                     <X className="h-5 w-5" />
@@ -305,44 +310,32 @@ function DoctorLeaveDialog({
             </div>
 
             <form action={formAction} className="space-y-4 p-5">
-                <Field label={t(language, "Doctor")}>
-                    <select
-                        name="doctorId"
-                        required
-                        defaultValue=""
-                        className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
-                    >
-                        <option value="" disabled>
-                            {t(language, "Select a doctor")}
-                        </option>
+                <input type="hidden" name="id" value={doctor.id} />
 
-                        {doctors
-                            .filter((doctor) => doctor.status === "active")
-                            .map((doctor) => (
-                                <option key={doctor.id} value={doctor.id}>
-                                    {language === "ar" && doctor.nameAr
-  ? doctor.nameAr
-  : doctor.name} — {doctor.specialty}
-                                </option>
-                            ))}
-                    </select>
-                </Field>
-
-                <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-                    <Field label={t(language, "Start date")}>
-                        <Input name="startDate" type="date" required />
-                    </Field>
-
-                    <Field label={t(language, "End date")}>
-                        <Input name="endDate" type="date" required />
-                    </Field>
+                <div className="rounded-md bg-muted/40 px-3 py-2 text-xs text-muted-foreground">
+                    {t(language, "The doctor signs in with")}{" "}
+                    <span className="font-semibold text-foreground">
+                        {doctor.email}
+                    </span>{" "}
+                    {t(
+                        language,
+                        "and can then manage their own appointments, profile and working hours."
+                    )}
                 </div>
 
-                <Field label={t(language, "Reason (optional)")}>
+                <Field
+                    label={t(
+                        language,
+                        doctor.hasLogin ? "New Password" : "Password"
+                    )}
+                >
                     <Input
-                        name="reason"
-                        placeholder={t(language, "e.g. Annual leave")}
-                        maxLength={300}
+                        name="password"
+                        type="password"
+                        autoComplete="new-password"
+                        minLength={6}
+                        required
+                        placeholder={t(language, "At least 6 characters")}
                     />
                 </Field>
 
@@ -362,13 +355,17 @@ function DoctorLeaveDialog({
                     </Button>
 
                     <SubmitButton>
-                        {t(language, "Schedule Leave")}
+                        {t(
+                            language,
+                            doctor.hasLogin ? "Reset Password" : "Enable Login"
+                        )}
                     </SubmitButton>
                 </div>
             </form>
         </Overlay>
     )
 }
+
 // Doctor schedule modal
 function ScheduleDialog({
     doctor,
@@ -448,66 +445,10 @@ function ScheduleDialog({
                     >
                         {t(language, "Cancel")}
                     </Button>
+
                     <SubmitButton>
                         {t(language, "Save Schedule")}
                     </SubmitButton>
-                </div>
-            </form>
-        </Overlay>
-    )
-}
-
-// ── Doctor login modal ────────────────────────────────────────────────────
-
-function LoginDialog({ doctor, onClose }: { doctor: DoctorRow; onClose: () => void }) {
-    const { language } = useLanguage()
-    const [state, formAction] = useActionState<DoctorFormState, FormData>(setDoctorLogin, {})
-
-    useEffect(() => {
-        if (state.success) onClose()
-    }, [state.success, onClose])
-
-    return (
-        <Overlay onClose={onClose}>
-            <div className="flex items-center justify-between border-b p-5">
-                <div>
-                    <h2 className="text-lg font-bold">{t(language, doctor.hasLogin ? "Reset Password" : "Enable Doctor Login")}</h2>
-                    <p className="text-sm text-muted-foreground">{doctor.name}</p>
-                </div>
-                <button onClick={onClose} className="text-muted-foreground hover:text-foreground">
-                    <X className="h-5 w-5" />
-                </button>
-            </div>
-
-            <form action={formAction} className="space-y-4 p-5">
-                <input type="hidden" name="id" value={doctor.id} />
-
-                <div className="rounded-md bg-muted/40 px-3 py-2 text-xs text-muted-foreground">
-                    {t(language, "The doctor signs in with")}{" "}
-                    <span className="font-semibold text-foreground">{doctor.email}</span>{" "}
-                    {t(language, "and can then manage their own appointments, profile and working hours.")}
-                </div>
-
-                <Field label={t(language, doctor.hasLogin ? "New Password" : "Password")}>
-                    <Input
-                        name="password"
-                        type="password"
-                        autoComplete="new-password"
-                        minLength={6}
-                        required
-                        placeholder={t(language, "At least 6 characters")}
-                    />
-                </Field>
-
-                {state.error && (
-                    <p className="rounded-md bg-destructive/10 px-3 py-2 text-sm font-medium text-destructive">
-                        {state.error}
-                    </p>
-                )}
-
-                <div className="flex justify-end gap-3 pt-2">
-                    <Button type="button" variant="outline" onClick={onClose}>{t(language, "Cancel")}</Button>
-                    <SubmitButton>{t(language, doctor.hasLogin ? "Reset Password" : "Enable Login")}</SubmitButton>
                 </div>
             </form>
         </Overlay>
@@ -528,6 +469,7 @@ function SpecialtiesDialog({
         createSpecialty,
         {}
     )
+
     const formRef = useRef<HTMLFormElement>(null)
 
     useEffect(() => {
@@ -558,36 +500,34 @@ function SpecialtiesDialog({
                     className="space-y-3"
                 >
                     <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-    <Input
-        name="name"
-        placeholder="Specialty name (English)"
-        required
-    />
+                        <Input
+                            name="name"
+                            placeholder="Specialty name (English)"
+                            required
+                        />
 
-    <Input
-        name="nameAr"
-        placeholder="اسم التخصص بالعربية"
-        dir="rtl"
-    />
+                        <Input
+                            name="nameAr"
+                            placeholder="اسم التخصص بالعربية"
+                            dir="rtl"
+                        />
 
-    
-<Input
-  name="description"
-  placeholder="Short description (English, optional)"
-/>
+                        <Input
+                            name="description"
+                            placeholder="Short description (English, optional)"
+                        />
 
-<Input
-  name="descriptionAr"
-  placeholder="وصف التخصص بالعربية (اختياري)"
-  dir="rtl"
-/>
+                        <Input
+                            name="descriptionAr"
+                            placeholder="وصف التخصص بالعربية (اختياري)"
+                            dir="rtl"
+                        />
 
-
-    <SubmitButton>
-        <Plus className="h-4 w-4" />
-        {t(language, "Add")}
-    </SubmitButton>
-</div>
+                        <SubmitButton>
+                            <Plus className="h-4 w-4" />
+                            {t(language, "Add")}
+                        </SubmitButton>
+                    </div>
 
                     {state.error && (
                         <p className="text-sm font-medium text-destructive">
@@ -609,22 +549,27 @@ function SpecialtiesDialog({
                             >
                                 <div className="min-w-0">
                                     <p
-    className="truncate font-semibold"
-    dir={language === "ar" ? "rtl" : "ltr"}
->
-    {language === "ar" && specialty.nameAr
-        ? specialty.nameAr
-        : specialty.name}
-</p>
-                                   {(language === "ar"
-  ? specialty.descriptionAr || specialty.description
-  : specialty.description) && (
-  <p className="truncate text-xs text-muted-foreground">
-    {language === "ar"
-      ? specialty.descriptionAr || specialty.description
-      : specialty.description}
-  </p>
-)}
+                                        className="truncate font-semibold"
+                                        dir={
+                                            language === "ar" ? "rtl" : "ltr"
+                                        }
+                                    >
+                                        {language === "ar" && specialty.nameAr
+                                            ? specialty.nameAr
+                                            : specialty.name}
+                                    </p>
+
+                                    {(language === "ar"
+                                        ? specialty.descriptionAr ||
+                                          specialty.description
+                                        : specialty.description) && (
+                                        <p className="truncate text-xs text-muted-foreground">
+                                            {language === "ar"
+                                                ? specialty.descriptionAr ||
+                                                  specialty.description
+                                                : specialty.description}
+                                        </p>
+                                    )}
                                 </div>
 
                                 <DeleteButton
@@ -703,10 +648,10 @@ export function DoctorsManager({
     const [dialog, setDialog] = useState<
         null | { mode: "create" } | { mode: "edit"; doctor: DoctorRow }
     >(null)
+
     const [scheduleFor, setScheduleFor] = useState<DoctorRow | null>(null)
     const [loginFor, setLoginFor] = useState<DoctorRow | null>(null)
     const [specialtiesOpen, setSpecialtiesOpen] = useState(false)
-    const [leaveDialogOpen, setLeaveDialogOpen] = useState(false)
 
     const term = searchTerm.trim().toLowerCase()
 
@@ -734,16 +679,6 @@ export function DoctorsManager({
                 </div>
 
                 <div className="flex items-center gap-2">
-                    <Button
-                        type="button"
-                        variant="outline"
-                        className="gap-2"
-                        onClick={() => setLeaveDialogOpen(true)}
-                    >
-                        <CalendarClock className="h-4 w-4" />
-                        {t(language, "Schedule Leave")}
-                    </Button>
-
                     <Button
                         type="button"
                         variant="outline"
@@ -791,7 +726,6 @@ export function DoctorsManager({
                             <TableHead>{t(language, "Specialty")}</TableHead>
                             <TableHead>{t(language, "Joined Date")}</TableHead>
                             <TableHead>{t(language, "Status")}</TableHead>
-                            <TableHead>{t(language, "Availability")}</TableHead>
                             <TableHead className="pr-6 text-right">
                                 {t(language, "Actions")}
                             </TableHead>
@@ -802,7 +736,7 @@ export function DoctorsManager({
                         {filtered.length === 0 ? (
                             <TableRow>
                                 <TableCell
-                                    colSpan={7}
+                                    colSpan={6}
                                     className="py-12 text-center text-muted-foreground"
                                 >
                                     {doctors.length === 0
@@ -831,23 +765,30 @@ export function DoctorsManager({
                                             <div className="flex h-9 w-9 items-center justify-center rounded-lg border border-primary/20 bg-primary/10">
                                                 <User className="h-5 w-5 text-primary" />
                                             </div>
+
                                             <div>
-                                                <span className="block font-bold">
-                                            <span
-    className="block font-bold"
-    dir={language === "ar" ? "rtl" : "ltr"}
->
-    {language === "ar" && doctor.nameAr
-        ? doctor.nameAr
-        : doctor.name}
-</span>
+                                                <span
+                                                    className="block font-bold"
+                                                    dir={
+                                                        language === "ar"
+                                                            ? "rtl"
+                                                            : "ltr"
+                                                    }
+                                                >
+                                                    {language === "ar" &&
+                                                    doctor.nameAr
+                                                        ? doctor.nameAr
+                                                        : doctor.name}
                                                 </span>
+
                                                 <span className="text-xs text-muted-foreground">
                                                     {doctor.email}
                                                 </span>
+
                                                 {doctor.hasLogin && (
                                                     <span className="ml-2 inline-flex items-center gap-1 text-[10px] font-semibold uppercase tracking-wide text-emerald-600">
-                                                        <KeyRound className="h-3 w-3" /> {t(language, "Login")}
+                                                        <KeyRound className="h-3 w-3" />
+                                                        {t(language, "Login")}
                                                     </span>
                                                 )}
                                             </div>
@@ -855,13 +796,12 @@ export function DoctorsManager({
                                     </TableCell>
 
                                     <TableCell className="font-medium text-primary">
-                                       <TableCell className="font-medium text-primary">
-    {language === "ar"
-        ? specialties.find(
-              (s) => s.name === doctor.specialty
-          )?.nameAr || doctor.specialty
-        : doctor.specialty}
-</TableCell>
+                                        {language === "ar"
+                                            ? specialties.find(
+                                                  (s) =>
+                                                      s.name === doctor.specialty
+                                              )?.nameAr || doctor.specialty
+                                            : doctor.specialty}
                                     </TableCell>
 
                                     <TableCell className="text-sm text-muted-foreground">
@@ -885,33 +825,6 @@ export function DoctorsManager({
                                                     </span>
                                                 </>
                                             )}
-                                        </div>
-                                    </TableCell>
-
-                                    <TableCell>
-                                        <div className="space-y-1">
-                                            <Badge
-                                                variant={
-                                                    doctor.availability ===
-                                                    "available"
-                                                        ? "success"
-                                                        : "secondary"
-                                                }
-                                            >
-                                                {t(
-                                                    language,
-                                                    doctor.availability ===
-                                                        "available"
-                                                        ? "Available"
-                                                        : "On Leave"
-                                                )}
-                                            </Badge>
-                                            <p className="text-xs text-muted-foreground">
-                                                {workingDaysLabel(
-                                                    doctor.schedule,
-                                                    language
-                                                )}
-                                            </p>
                                         </div>
                                     </TableCell>
 
@@ -942,9 +855,21 @@ export function DoctorsManager({
                                                 variant="ghost"
                                                 size="icon"
                                                 className="h-8 w-8 text-muted-foreground hover:text-primary"
-                                                onClick={() => setLoginFor(doctor)}
-                                                title={t(language, doctor.hasLogin ? "Reset login password" : "Enable doctor login")}
-                                                aria-label={t(language, doctor.hasLogin ? "Reset login password" : "Enable doctor login")}
+                                                onClick={() =>
+                                                    setLoginFor(doctor)
+                                                }
+                                                title={t(
+                                                    language,
+                                                    doctor.hasLogin
+                                                        ? "Reset login password"
+                                                        : "Enable doctor login"
+                                                )}
+                                                aria-label={t(
+                                                    language,
+                                                    doctor.hasLogin
+                                                        ? "Reset login password"
+                                                        : "Enable doctor login"
+                                                )}
                                             >
                                                 <KeyRound className="h-4 w-4" />
                                             </Button>
@@ -1010,41 +935,22 @@ export function DoctorsManager({
                     onClose={() => setScheduleFor(null)}
                 />
             )}
-            {loginFor && <LoginDialog doctor={loginFor} onClose={() => setLoginFor(null)} />}
+
+            {loginFor && (
+                <LoginDialog
+                    doctor={loginFor}
+                    onClose={() => setLoginFor(null)}
+                />
+            )}
+
             {specialtiesOpen && (
                 <SpecialtiesDialog
                     specialties={specialties}
                     onClose={() => setSpecialtiesOpen(false)}
                 />
             )}
-
-            {leaveDialogOpen && (
-                <DoctorLeaveDialog
-                    doctors={doctors}
-                    onClose={() => setLeaveDialogOpen(false)}
-                />
-            )}
         </div>
     )
-}
-/** Short summary of the days a doctor works, e.g. "Mon, Tue, Wed +2". */
-function workingDaysLabel(
-    schedule: DayHours[],
-    language: ReturnType<typeof useLanguage>["language"]
-): string {
-    const open = DAYS.filter((day) => {
-        const entry = schedule.find((item) => item.day === day)
-        return entry && !entry.closed
-    })
-
-    if (open.length === 0) return t(language, "No working days")
-    if (open.length === 7) return t(language, "Every day")
-
-    const short = open.map((day) => t(language, day).slice(0, 3))
-
-    return short.length > 3
-        ? `${short.slice(0, 3).join(", ")} +${short.length - 3}`
-        : short.join(", ")
 }
 
 /** Summary of the clinic's opening hours. */

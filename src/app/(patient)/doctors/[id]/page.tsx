@@ -43,7 +43,6 @@ export default async function DoctorProfilePage({
                 nameAr: doctor.nameAr || "",
                 image: doctor.image || "",
                 specialty: doctor.specialty,
-                availability: doctor.availability,
                 rating: doctor.rating,
                 reviews: doctor.reviews,
                 experience: doctor.experience,
