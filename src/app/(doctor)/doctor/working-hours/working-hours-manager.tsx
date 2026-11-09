@@ -141,8 +141,8 @@ export function WorkingHoursManager({
                             <table className="w-full min-w-[420px] border-collapse text-sm">
                                 <thead>
                                     <tr className="border-b text-start text-muted-foreground">
-                                        <th scope="col" className="px-3 py-3 font-medium">{t(language, "Day")}</th>
-                                        <th scope="col" className="px-3 py-3 font-medium">{t(language, "Saved doctor working hours")}</th>
+                                        <th scope="col" className="px-3 py-3 text-start font-medium">{t(language, "Day")}</th>
+                                        <th scope="col" className="px-3 py-3 text-start font-medium">{t(language, "Saved doctor working hours")}</th>
                                     </tr>
                                 </thead>
                                 <tbody>
