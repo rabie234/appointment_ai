@@ -63,6 +63,19 @@ export async function updateClinicHours(
       { upsert: true, new: true, setDefaultsOnInsert: true }
     );
 
+    // Mark every clinic-closed weekday as off in each doctor's saved schedule.
+    // Keep the time values so an admin can restore them if the clinic reopens it.
+    const closedDays = week.filter((entry) => entry.closed).map((entry) => entry.day);
+    await Promise.all(
+      closedDays.map((day) =>
+        Doctor.updateMany(
+          { 'schedule.day': day },
+          { $set: { 'schedule.$[closedDay].closed': true } },
+          { arrayFilters: [{ 'closedDay.day': day }] },
+        ),
+      ),
+    );
+
     if (clinicHoursChanged) {
       const doctors = await Doctor.find({
         user: { $exists: true, $ne: null },
@@ -78,7 +91,7 @@ export async function updateClinicHours(
                   category: 'schedule',
                   titleKey: 'Notification: Clinic hours updated',
                   bodyKey:
-                    'Notification body: The clinic updated its working hours. Review the change on your Working Hours page. Your saved schedule will not be changed; patient availability follows both schedules.',
+                    'Notification body: The clinic updated its working hours. Review and apply them on your Working Hours page.',
                   href: '/doctor/working-hours',
                 }),
               ]
