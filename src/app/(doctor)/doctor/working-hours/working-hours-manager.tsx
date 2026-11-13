@@ -109,9 +109,10 @@ export function WorkingHoursManager({
         const conflict = conflictAt(day)
         return conflict.open || conflict.close
     })
+    const needsClinicHoursReview =
+        clinicHoursVersion !== acknowledgedClinicHoursVersion
     const clinicHoursApplied =
-        !hasClinicHoursConflict &&
-        clinicHoursVersion === acknowledgedClinicHoursVersion
+        !hasClinicHoursConflict && !needsClinicHoursReview
     const dateFormatter = new Intl.DateTimeFormat(
         language === "ar" ? "ar-LB" : "en-US",
         { year: "numeric", month: "short", day: "numeric" }
@@ -164,14 +165,20 @@ export function WorkingHoursManager({
                         <CardContent className="space-y-2">
                             {currentSchedule.map((day) => {
                                 const conflict = conflictAt(day)
+                                const clinicDay = clinicByDay.get(day.day)
+                                const changedOpen = needsClinicHoursReview && clinicDay && !day.closed && !clinicDay.closed && day.open !== clinicDay.open
+                                const changedClose = needsClinicHoursReview && clinicDay && !day.closed && !clinicDay.closed && day.close !== clinicDay.close
+                                const changedClosedStatus = needsClinicHoursReview && clinicDay && day.closed !== clinicDay.closed
                                 return (
                                     <div key={day.day} className="flex justify-between gap-3 text-sm">
                                         <span>{t(language, day.day)}</span>
                                         <span className="tabular-nums">
-                                            {day.closed ? t(language, "Off") : (
+                                            {day.closed ? (
+                                                <>{t(language, "Off")}{changedClosedStatus && <span aria-hidden="true" className="ms-1 text-xs font-bold text-red-600">*</span>}</>
+                                            ) : (
                                                 <>
-                                                    {day.open}{hasClinicHoursConflict && conflict.open && <span aria-hidden="true" className="ml-1 text-xs font-bold text-red-600">*</span>}
-                                                    –{day.close}{hasClinicHoursConflict && conflict.close && <span aria-hidden="true" className="ml-1 text-xs font-bold text-red-600">*</span>}
+                                                    {day.open}{((hasClinicHoursConflict && conflict.open) || changedOpen) && <span aria-hidden="true" className="ms-1 text-xs font-bold text-red-600">*</span>}
+                                                    –{day.close}{((hasClinicHoursConflict && conflict.close) || changedClose) && <span aria-hidden="true" className="ms-1 text-xs font-bold text-red-600">*</span>}
                                                 </>
                                             )}
                                         </span>
@@ -183,12 +190,27 @@ export function WorkingHoursManager({
                     <Card className="bg-card/60">
                         <CardHeader><CardTitle className="text-xl">{t(language, "Current clinic hours")}</CardTitle></CardHeader>
                         <CardContent className="space-y-2">
-                            {clinicSchedule.map((day) => (
-                                <div key={day.day} className="flex justify-between gap-3 text-sm">
-                                    <span>{t(language, day.day)}</span>
-                                    <span className="tabular-nums">{day.closed ? t(language, "Off") : day.open + "–" + day.close}</span>
-                                </div>
-                            ))}
+                            {clinicSchedule.map((day) => {
+                                const doctorDay = currentSchedule.find((savedDay) => savedDay.day === day.day)
+                                const changedOpen = needsClinicHoursReview && doctorDay && !day.closed && !doctorDay.closed && day.open !== doctorDay.open
+                                const changedClose = needsClinicHoursReview && doctorDay && !day.closed && !doctorDay.closed && day.close !== doctorDay.close
+                                const changedClosedStatus = needsClinicHoursReview && doctorDay && day.closed !== doctorDay.closed
+                                return (
+                                    <div key={day.day} className="flex justify-between gap-3 text-sm">
+                                        <span>{t(language, day.day)}</span>
+                                        <span className="tabular-nums">
+                                            {day.closed ? (
+                                                <>{t(language, "Off")}{changedClosedStatus && <span aria-hidden="true" className="ms-1 text-xs font-bold text-red-600">*</span>}</>
+                                            ) : (
+                                                <>
+                                                    {day.open}{changedOpen && <span aria-hidden="true" className="ms-1 text-xs font-bold text-red-600">*</span>}
+                                                    –{day.close}{changedClose && <span aria-hidden="true" className="ms-1 text-xs font-bold text-red-600">*</span>}
+                                                </>
+                                            )}
+                                        </span>
+                                    </div>
+                                )
+                            })}
                         </CardContent>
                     </Card>
                 </div>
@@ -199,15 +221,18 @@ export function WorkingHoursManager({
                         {t(language, "Current clinic hours were applied to your saved schedule. You can request changes below.")}
                     </p>
                 )}
-            {hasClinicHoursConflict && (
+            {(needsClinicHoursReview || hasClinicHoursConflict) && (
                 <div className="space-y-3 rounded-md border border-amber-300 bg-amber-50 p-4 text-sm text-amber-950 dark:border-amber-900 dark:bg-amber-950/30 dark:text-amber-100">
-                    <p>{t(language, "Your saved working hours extend beyond the current clinic hours. The red star marks the conflicting time. Continuing will replace your saved schedule with the current clinic hours. You can request changes afterward.")}</p>
+                    <p>
+                        {hasClinicHoursConflict
+                            ? t(language, "Your saved working hours extend beyond the current clinic hours. The red star marks the conflicting time. Continuing will replace your saved schedule with the current clinic hours. You can request changes afterward.")
+                            : t(language, "Red stars mark clinic hours that differ from your saved schedule. Reviewing applies the current clinic hours to your schedule.")}
+                    </p>
                     <form action={acknowledgeClinicHours}>
                         <SubmitButton>{t(language, "I Reviewed and Apply Clinic Hours")}</SubmitButton>
                     </form>
                 </div>
-            )}
-            <Card className="border-none bg-card/60 shadow-sm">
+            )}            <Card className="border-none bg-card/60 shadow-sm">
                 <CardHeader>
                     <CardTitle className="text-xl">
                         {t(language, "Request a schedule change")}

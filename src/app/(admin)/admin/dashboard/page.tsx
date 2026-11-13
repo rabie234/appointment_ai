@@ -85,16 +85,41 @@ function badgeVariant(status: Status) {
 const shortDay = new Intl.DateTimeFormat("en-US", { weekday: "short", timeZone: "UTC" })
 const monthDay = new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric", timeZone: "UTC" })
 
-type Delta = { text: string; direction: "up" | "down" | "flat"; period: string }
+type Delta = { text: string; direction: "up" | "down" | "flat"; period: string; unit?: string }
 
 /** Signed change of `current` against `previous`, as a percentage when possible. */
 function delta(current: number, previous: number, period: string): Delta {
+    const periodWithoutUnit = period.replace(/^bookings\s+/, "")
+
     if (previous === 0) {
         return current === 0
             ? { text: "No change", direction: "flat", period }
-            : { text: `+${current.toLocaleString()}`, direction: "up", period }
+            : {
+                  text: `+${current.toLocaleString()}`,
+                  direction: "up",
+                  period: periodWithoutUnit,
+                  unit: "bookings",
+              }
     }
-    const pct = Math.round(((current - previous) / previous) * 100)
+
+    const difference = current - previous
+
+    // Percentages are misleading with a very small baseline (for example,
+    // 1 booking growing to 12 appears as +1100%). Show the actual change.
+    if (previous < 5) {
+        if (difference === 0) {
+            return { text: "No change", direction: "flat", period }
+        }
+
+        return {
+            text: `${difference > 0 ? "+" : ""}${difference.toLocaleString()}`,
+            direction: difference > 0 ? "up" : "down",
+            period: periodWithoutUnit,
+            unit: "bookings",
+        }
+    }
+
+    const pct = Math.round((difference / previous) * 100)
     if (pct === 0) return { text: "0%", direction: "flat", period }
     return { text: `${pct > 0 ? "+" : ""}${pct}%`, direction: pct > 0 ? "up" : "down", period }
 }
@@ -565,6 +590,11 @@ function DeltaLine({ delta }: { delta: Delta }) {
             <span className={cn("font-medium text-xs", tone)}>
                 <DashboardText text={delta.text} />
             </span>
+            {delta.unit && (
+                <span className={cn("font-medium text-xs ml-1", tone)}>
+                    <DashboardText text={delta.unit} />
+                </span>
+            )}
 
             <span className="text-[10px] text-muted-foreground ml-1">
                 <DashboardText text={delta.period} />

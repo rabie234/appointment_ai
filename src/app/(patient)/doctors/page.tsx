@@ -15,30 +15,29 @@ export default async function DoctorsListingPage() {
         Specialty.find().sort({ name: 1 }).lean(),
     ])
 
-    const doctors: DoctorCard[] = doctorDocs.map((d) => ({
-        id: String(d._id),
-        name: d.name,
-        nameAr: d.nameAr?.trim() || "",
-        specialty: d.specialty,
-        rating: d.rating ?? 0,
-        reviews: d.reviews ?? 0,
-        available: d.availability === "available",
-        image: d.image ?? "",
+    // Prepare doctor data for the listing
+    const doctors: DoctorCard[] = doctorDocs.map((doctor) => ({
+        id: String(doctor._id),
+        name: doctor.name,
+        nameAr: doctor.nameAr?.trim() || "",
+        specialty: doctor.specialty,
+        available: doctor.availability === "available",
+        image: doctor.image ?? "",
     }))
 
-    // Keep the English name as the stable filter value.
-    // Use the Arabic name saved in MongoDB for display.
+    // Prepare Arabic specialty translations
     const specialtyMap: Record<string, string> = {}
 
-    for (const s of specialtyDocs) {
-        specialtyMap[s.name] = s.nameAr?.trim() || s.name
+    for (const specialty of specialtyDocs) {
+        specialtyMap[specialty.name] =
+            specialty.nameAr?.trim() || specialty.name
     }
 
-    // Include specialties used by active doctors, even if not registered separately.
+    // Include specialties used by active doctors
     const specialties = Array.from(
         new Set([
-            ...specialtyDocs.map((s) => s.name),
-            ...doctors.map((d) => d.specialty),
+            ...specialtyDocs.map((specialty) => specialty.name),
+            ...doctors.map((doctor) => doctor.specialty),
         ])
     ).sort()
 

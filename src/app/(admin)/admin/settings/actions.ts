@@ -13,7 +13,7 @@ import {
   dayOfWeek,
   slotsForDay,
 } from '@/lib/schedule';
-import { notifyAppointmentParties } from '@/lib/notification-service';
+import { notifyAppointmentParties, notifyUser } from '@/lib/notification-service';
 
 export type ClinicHoursState = { error?: string; success?: boolean };
 
@@ -37,11 +37,55 @@ export async function updateClinicHours(
   await connectDB();
 
   try {
+    const previousClinicHours = await ClinicHours.findOne({ key: 'clinic' })
+      .select('hours')
+      .lean();
+    const comparableHours = (hours: typeof week) =>
+      [...hours]
+        .sort((a, b) => a.day.localeCompare(b.day))
+        .map(({ day, open, close, closed }) => [
+          day,
+          closed,
+          closed ? '' : open,
+          closed ? '' : close,
+        ]);
+    const clinicHoursChanged =
+      !previousClinicHours ||
+      JSON.stringify(comparableHours(previousClinicHours.hours)) !==
+        JSON.stringify(comparableHours(week));
+
     await ClinicHours.findOneAndUpdate(
       { key: 'clinic' },
-      { $set: { key: 'clinic', hours: week }, $inc: { version: 1 } },
+      {
+        $set: { key: 'clinic', hours: week },
+        ...(clinicHoursChanged ? { $inc: { version: 1 } } : {}),
+      },
       { upsert: true, new: true, setDefaultsOnInsert: true }
     );
+
+    if (clinicHoursChanged) {
+      const doctors = await Doctor.find({
+        user: { $exists: true, $ne: null },
+      })
+        .select('user')
+        .lean();
+
+      await Promise.all(
+        doctors.flatMap((doctor) =>
+          doctor.user
+            ? [
+                notifyUser(String(doctor.user), {
+                  category: 'schedule',
+                  titleKey: 'Notification: Clinic hours updated',
+                  bodyKey:
+                    'Notification body: The clinic updated its working hours. Review and apply them on your Working Hours page.',
+                  href: '/doctor/working-hours',
+                }),
+              ]
+            : []
+        )
+      );
+    }
 
     // Find active future appointments, including those
     // previously marked as affected.

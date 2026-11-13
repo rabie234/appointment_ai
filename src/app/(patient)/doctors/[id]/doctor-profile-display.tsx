@@ -5,7 +5,6 @@ import Link from "next/link"
 import type { ReactNode } from "react"
 import { Card, CardContent } from "@/components/ui/card"
 import {
-    Star,
     MapPin,
     ChevronLeft,
     ShieldCheck,
@@ -25,8 +24,6 @@ type DoctorData = {
     nameAr: string
     image: string
     specialty: string
-    rating: number
-    reviews: number
     experience: string | number
     successRate: number | null
     totalPatients: number
@@ -176,22 +173,6 @@ export default function DoctorProfileDisplay({
                             </p>
 
                             <div className="flex flex-wrap items-center gap-4 text-sm text-muted-foreground">
-                                <div className="flex items-center">
-                                    <Star className="h-4 w-4 text-amber-500 fill-current me-1" />
-
-                                    <span
-                                        dir="ltr"
-                                        className="font-bold text-foreground"
-                                    >
-                                        {doctor.rating.toFixed(1)}
-                                    </span>
-
-                                    <span className="ms-1">
-                                        ({doctor.reviews}{" "}
-                                        {t(language, "reviews")})
-                                    </span>
-                                </div>
-
                                 <div className="flex items-center">
                                     <MapPin className="h-4 w-4 text-primary me-1" />
                                     {t(language, "Downtown Medical Center")}

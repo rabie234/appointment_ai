@@ -7,7 +7,7 @@ import { Button } from "@/components/ui/button"
 import { Card, CardTitle } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
 import { Badge } from "@/components/ui/badge"
-import { Search, Star, Clock, MapPin } from "lucide-react"
+import { Search, MapPin } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { useLanguage } from "@/components/i18n/language-provider"
 import { t } from "@/components/i18n/translations"
@@ -17,8 +17,6 @@ export type DoctorCard = {
     name: string
     nameAr: string
     specialty: string
-    rating: number
-    reviews: number
     available: boolean
     image: string
 }
@@ -241,48 +239,29 @@ if (
                                             )}
                                         </div>
 
-                                        <div className="flex-1 p-5 flex flex-col justify-between">
-                                            <div>
-                                                <div className="flex justify-between items-start gap-2">
-                                                    <CardTitle className="text-lg group-hover:text-primary transition-colors">
-                                                        {isArabic && doctor.nameAr
+                                        <div className="flex-1 p-5 flex flex-col justify-between min-w-0">
+                                            <div className="min-w-0">
+                                                <CardTitle className="text-lg leading-snug group-hover:text-primary transition-colors break-words">
+                                                    {isArabic && doctor.nameAr
                                                         ? doctor.nameAr
-                                                          : doctor.name}
-                                                    </CardTitle>
+                                                        : doctor.name}
+                                                </CardTitle>
 
-                                                    <div className="flex items-center text-amber-500 text-sm font-bold bg-amber-50 dark:bg-amber-900/20 px-1.5 py-0.5 rounded shrink-0">
-                                                        <Star className="h-3 w-3 fill-current me-1" />
-                                                        {doctor.rating.toFixed(1)}
-                                                    </div>
-                                                </div>
-
-                                                <p className="text-primary text-sm font-semibold mt-1">
+                                                <p className="text-primary text-sm font-semibold mt-2">
                                                     {isArabic
                                                         ? specialtyMap[doctor.specialty] ??
                                                           doctor.specialty
                                                         : doctor.specialty}
                                                 </p>
 
-                                                <div className="mt-4 space-y-2">
-                                                    <div className="flex items-center gap-2 text-xs text-muted-foreground">
-                                                        <Clock className="h-3.5 w-3.5 text-primary shrink-0" />
-                                                        <span>
-                                                            {new Intl.NumberFormat(
-                                                                isArabic ? "ar-LB" : "en-US"
-                                                            ).format(doctor.reviews)}{" "}
-                                                            {t(language, "reviews")}
-                                                        </span>
-                                                    </div>
-
-                                                    <div className="flex items-center gap-2 text-xs text-muted-foreground">
-                                                        <MapPin className="h-3.5 w-3.5 text-primary shrink-0" />
-                                                        <span>
-                                                            {t(
-                                                                language,
-                                                                "Downtown Medical Center"
-                                                            )}
-                                                        </span>
-                                                    </div>
+                                                <div className="flex items-start gap-2 text-xs text-muted-foreground mt-3">
+                                                    <MapPin className="h-3.5 w-3.5 text-primary shrink-0 mt-0.5" />
+                                                    <span>
+                                                        {t(
+                                                            language,
+                                                            "Downtown Medical Center"
+                                                        )}
+                                                    </span>
                                                 </div>
                                             </div>
 

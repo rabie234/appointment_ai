@@ -661,6 +661,8 @@ const translations = {
     "Your saved working hours extend beyond the current clinic hours. The red star marks the conflicting time. Continuing will replace your saved schedule with the current clinic hours. You can request changes afterward.": "تمتد ساعات عملك المحفوظة إلى ما بعد ساعات المركز الحالية. تشير النجمة الحمراء إلى الوقت المتعارض. عند المتابعة، سيُستبدل جدولك المحفوظ بساعات المركز الحالية. يمكنك طلب تغييره لاحقًا.",
     "Current clinic hours were applied to your saved schedule. You can request changes below.": "تم تطبيق ساعات المركز الحالية على جدولك المحفوظ. يمكنك طلب تغييره أدناه.",
     "Day": "اليوم",
+        "Notification: Clinic hours updated": "تم تحديث ساعات المركز",
+    "Notification body: The clinic updated its working hours. Review and apply them on your Working Hours page.": "حدّث المركز ساعات العمل. راجعها وطبّقها من صفحة ساعات العمل.",
 } as const;
 
 export function t(language: Language, text: string): string {
