@@ -333,13 +333,13 @@ export async function adminCreateAppointment(
     appointmentId,
     {
       category: "appointment",
-      titleKey: "Notification: Appointment confirmed",
-      bodyKey: "Notification body: Your appointment has been confirmed.",
+      titleKey: "Appointment confirmed",
+      bodyKey: "Your appointment has been confirmed.",
       href: "/appointments",
     },
     {
       category: "appointment",
-      titleKey: "Notification: Appointment confirmed",
+      titleKey: "Appointment confirmed",
       bodyKey: "Notification body: A confirmed appointment was added to your schedule.",
       href: "/doctor/appointments",
     }
