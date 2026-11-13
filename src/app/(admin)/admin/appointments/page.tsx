@@ -143,6 +143,11 @@ export default async function AdminAppointmentsPage({
                 time: to12h(appointment.time),
                 endTime: to12h(slotEnd(appointment.time)),
                 status: appointment.status,
+                needsScheduleReview: Boolean(
+                    appointment.clinicHoursConflict ||
+                        appointment.leaveConflict ||
+                        appointment.scheduleChangeRequestId
+                ),
                 type: appointment.type,
                 price: `$${appointment.price.toFixed(2)}`,
                 startedAt: stampTime(appointment.startedAt),

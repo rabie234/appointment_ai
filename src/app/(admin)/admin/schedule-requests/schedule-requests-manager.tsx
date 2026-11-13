@@ -57,7 +57,15 @@ function ScheduleColumn({
                     <span className="text-muted-foreground" dir="ltr">
                         {day.closed
                             ? t(language, "Off")
-                            : `${day.open}–${day.close}`}
+                            : (day.intervals?.length
+                                  ? day.intervals
+                                  : [{ open: day.open, close: day.close }]
+                              )
+                                  .map(
+                                      (interval) =>
+                                          `${interval.open}–${interval.close}`
+                                  )
+                                  .join(" · ")}
                     </span>
                 </p>
             ))}

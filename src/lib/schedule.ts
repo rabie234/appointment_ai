@@ -1,30 +1,34 @@
 /**
- * Shared vocabulary for clinic + doctor scheduling. Kept dependency-free so it
- * can be imported from server actions, models, and client components alike.
+ * Shared schedule utilities for clinic and doctor working hours.
  *
- * Every schedule is a fixed 7-entry array, one per weekday, in DAYS order.
- * Times are stored as "HH:MM" 24-hour strings; an empty/closed day carries the
- * flag rather than relying on blank times.
+ * A day can contain one or more intervals. The `open` and `close` fields
+ * remain for compatibility with existing parts of the app; when `intervals`
+ * is present, it is the source of truth.
  */
 
 export const DAYS = [
-  'Monday',
-  'Tuesday',
-  'Wednesday',
-  'Thursday',
-  'Friday',
-  'Saturday',
-  'Sunday',
+  "Monday",
+  "Tuesday",
+  "Wednesday",
+  "Thursday",
+  "Friday",
+  "Saturday",
+  "Sunday",
 ] as const;
 
 export type Day = (typeof DAYS)[number];
 
-/** One day's window. `closed` (clinic) / `off` (doctor) means not working. */
+export interface TimeInterval {
+  open: string;
+  close: string;
+}
+
 export interface DayHours {
   day: Day;
-  open: string; // "HH:MM"
-  close: string; // "HH:MM"
+  open: string;
+  close: string;
   closed: boolean;
+  intervals?: TimeInterval[];
 }
 
 const TIME_PATTERN = /^([01]\d|2[0-3]):[0-5]\d$/;
@@ -33,45 +37,156 @@ export function isValidTime(value: string): boolean {
   return TIME_PATTERN.test(value);
 }
 
-/** Minutes since midnight, for ordering/containment checks. NaN if malformed. */
+/** Minutes after midnight. Returns NaN for malformed values. */
 export function toMinutes(time: string): number {
-  if (!isValidTime(time)) return NaN;
-  const [h, m] = time.split(':').map(Number);
-  return h * 60 + m;
+  if (!isValidTime(time)) return Number.NaN;
+
+  const [hours, minutes] = time.split(":").map(Number);
+  return hours * 60 + minutes;
 }
 
-/** A sensible default week: Mon–Fri 09:00–17:00, weekend closed. */
-export function defaultWeek(): DayHours[] {
-  return DAYS.map((day) => ({
-    day,
-    open: '09:00',
-    close: '17:00',
-    closed: day === 'Saturday' || day === 'Sunday',
-  }));
+export function minutesToTime(totalMinutes: number): string {
+  const hours = Math.floor(totalMinutes / 60);
+  const minutes = totalMinutes % 60;
+
+  return `${String(hours).padStart(2, "0")}:${String(minutes).padStart(2, "0")}`;
 }
 
 /**
- * Coerce arbitrary stored/submitted data into a complete, ordered week.
- * Missing days fall back to the default; unknown extra entries are dropped.
- * This keeps callers from ever having to reason about a partial schedule.
+ * Sorts valid intervals and joins intervals that overlap or touch.
+ * Invalid intervals are discarded when normalizing stored data.
+ */
+export function normalizeIntervals(input: unknown): TimeInterval[] {
+  if (!Array.isArray(input)) return [];
+
+  const valid = input
+    .filter(
+      (item): item is TimeInterval =>
+        Boolean(
+          item &&
+            typeof item === "object" &&
+            "open" in item &&
+            "close" in item &&
+            typeof (item as TimeInterval).open === "string" &&
+            typeof (item as TimeInterval).close === "string" &&
+            isValidTime((item as TimeInterval).open) &&
+            isValidTime((item as TimeInterval).close) &&
+            toMinutes((item as TimeInterval).open) <
+              toMinutes((item as TimeInterval).close)
+        )
+    )
+    .map((item) => ({ open: item.open, close: item.close }))
+    .sort((a, b) => toMinutes(a.open) - toMinutes(b.open));
+
+  const merged: TimeInterval[] = [];
+
+  for (const current of valid) {
+    const previous = merged[merged.length - 1];
+
+    if (!previous || toMinutes(current.open) > toMinutes(previous.close)) {
+      merged.push({ ...current });
+      continue;
+    }
+
+    if (toMinutes(current.close) > toMinutes(previous.close)) {
+      previous.close = current.close;
+    }
+  }
+
+  return merged;
+}
+
+/**
+ * Returns a day's intervals. Supports old records that only have `open`
+ * and `close`, as well as new records with `intervals`.
+ */
+export function intervalsForDay(entry: DayHours): TimeInterval[] {
+  if (entry.closed) return [];
+
+  if (Array.isArray(entry.intervals)) {
+    return normalizeIntervals(entry.intervals);
+  }
+
+  if (
+    isValidTime(entry.open) &&
+    isValidTime(entry.close) &&
+    toMinutes(entry.open) < toMinutes(entry.close)
+  ) {
+    return [{ open: entry.open, close: entry.close }];
+  }
+
+  return [];
+}
+
+/** Monday–Friday 09:00–17:00, with Saturday and Sunday closed. */
+export function defaultWeek(): DayHours[] {
+  return DAYS.map((day) => {
+    const closed = day === "Saturday" || day === "Sunday";
+
+    return {
+      day,
+      open: "09:00",
+      close: "17:00",
+      closed,
+      intervals: closed ? [] : [{ open: "09:00", close: "17:00" }],
+    };
+  });
+}
+
+/**
+ * Coerces stored data into a complete, ordered week.
+ * Old one-interval records are converted into the new interval format.
  */
 export function normalizeWeek(input: unknown): DayHours[] {
-  const byDay = new Map<string, Partial<DayHours>>();
+  const byDay = new Map<string, Record<string, unknown>>();
+
   if (Array.isArray(input)) {
     for (const entry of input) {
-      if (entry && typeof entry === 'object' && 'day' in entry) {
-        byDay.set(String((entry as DayHours).day), entry as Partial<DayHours>);
+      if (
+        entry &&
+        typeof entry === "object" &&
+        "day" in entry
+      ) {
+        const record = entry as Record<string, unknown>;
+        byDay.set(String(record.day), record);
       }
     }
   }
 
   const fallback = defaultWeek();
-  return DAYS.map((day, i) => {
-    const src = byDay.get(day) ?? {};
-    const open = typeof src.open === 'string' && isValidTime(src.open) ? src.open : fallback[i].open;
-    const close = typeof src.close === 'string' && isValidTime(src.close) ? src.close : fallback[i].close;
-    const closed = Boolean(src.closed);
-    return { day, open, close, closed };
+
+  return DAYS.map((day, index) => {
+    const source = byDay.get(day);
+    if (!source) return fallback[index];
+
+    const sourceOpen =
+      typeof source.open === "string" && isValidTime(source.open)
+        ? source.open
+        : fallback[index].open;
+
+    const sourceClose =
+      typeof source.close === "string" && isValidTime(source.close)
+        ? source.close
+        : fallback[index].close;
+
+    const explicitlyClosed = Boolean(source.closed);
+
+    const intervals = explicitlyClosed
+      ? []
+      : Array.isArray(source.intervals)
+        ? normalizeIntervals(source.intervals)
+        : normalizeIntervals([{ open: sourceOpen, close: sourceClose }]);
+
+    const first = intervals[0];
+    const last = intervals[intervals.length - 1];
+
+    return {
+      day,
+      open: first?.open ?? sourceOpen,
+      close: last?.close ?? sourceClose,
+      closed: explicitlyClosed || intervals.length === 0,
+      intervals,
+    };
   });
 }
 
@@ -80,159 +195,233 @@ export interface ValidationResult {
   error?: string;
 }
 
-/** An open day must have open < close. Closed days are always fine. */
+/** Validates one day's intervals, including overlaps. */
 export function validateDay(entry: DayHours): ValidationResult {
   if (entry.closed) return { ok: true };
-  if (!isValidTime(entry.open) || !isValidTime(entry.close)) {
-    return { ok: false, error: `${entry.day}: invalid time` };
+
+  const rawIntervals = Array.isArray(entry.intervals)
+    ? entry.intervals
+    : [{ open: entry.open, close: entry.close }];
+
+  if (rawIntervals.length === 0) {
+    return {
+      ok: false,
+      error: `${entry.day}: add at least one working time or mark the day off`,
+    };
   }
-  if (toMinutes(entry.open) >= toMinutes(entry.close)) {
-    return { ok: false, error: `${entry.day}: opening time must be before closing time` };
+
+  const intervals: TimeInterval[] = [];
+
+  for (const item of rawIntervals) {
+    if (
+      !item ||
+      typeof item.open !== "string" ||
+      typeof item.close !== "string" ||
+      !isValidTime(item.open) ||
+      !isValidTime(item.close)
+    ) {
+      return { ok: false, error: `${entry.day}: invalid time` };
+    }
+
+    if (toMinutes(item.open) >= toMinutes(item.close)) {
+      return {
+        ok: false,
+        error: `${entry.day}: each opening time must be before its closing time`,
+      };
+    }
+
+    intervals.push({ open: item.open, close: item.close });
   }
+
+  intervals.sort((a, b) => toMinutes(a.open) - toMinutes(b.open));
+
+  for (let index = 1; index < intervals.length; index += 1) {
+    if (
+      toMinutes(intervals[index].open) <
+      toMinutes(intervals[index - 1].close)
+    ) {
+      return {
+        ok: false,
+        error: `${entry.day}: working time ranges must not overlap`,
+      };
+    }
+  }
+
   return { ok: true };
 }
 
 export function validateWeek(week: DayHours[]): ValidationResult {
   for (const entry of week) {
-    const res = validateDay(entry);
-    if (!res.ok) return res;
+    const result = validateDay(entry);
+    if (!result.ok) return result;
   }
+
   return { ok: true };
 }
 
 /**
- * Check a doctor's week against the clinic's open hours. A doctor may only work
- * on days the clinic is open, and within (or equal to) the clinic's window.
+ * Each doctor interval must fit completely inside one clinic interval.
+ * A doctor's interval cannot cross a clinic break.
  */
 export function validateAgainstClinic(
   doctor: DayHours[],
   clinic: DayHours[]
 ): ValidationResult {
-  const clinicByDay = new Map(clinic.map((c) => [c.day, c]));
+  const clinicByDay = new Map(clinic.map((entry) => [entry.day, entry]));
 
-  for (const d of doctor) {
-    if (d.closed) continue;
+  for (const doctorDay of doctor) {
+    if (doctorDay.closed) continue;
 
-    const c = clinicByDay.get(d.day);
-    if (!c || c.closed) {
-      return { ok: false, error: `${d.day}: the clinic is closed on this day` };
-    }
-    if (toMinutes(d.open) < toMinutes(c.open) || toMinutes(d.close) > toMinutes(c.close)) {
+    const clinicDay = clinicByDay.get(doctorDay.day);
+    const doctorIntervals = intervalsForDay(doctorDay);
+
+    if (!doctorIntervals.length) {
       return {
         ok: false,
-        error: `${d.day}: hours must fall within the clinic window (${c.open}–${c.close})`,
+        error: `${doctorDay.day}: add working hours or mark the day off`,
       };
     }
+
+    if (!clinicDay || clinicDay.closed) {
+      return {
+        ok: false,
+        error: `${doctorDay.day}: the clinic is closed on this day`,
+      };
+    }
+
+    const clinicIntervals = intervalsForDay(clinicDay);
+
+    for (const doctorInterval of doctorIntervals) {
+      const fitsClinicInterval = clinicIntervals.some(
+        (clinicInterval) =>
+          toMinutes(doctorInterval.open) >= toMinutes(clinicInterval.open) &&
+          toMinutes(doctorInterval.close) <= toMinutes(clinicInterval.close)
+      );
+
+      if (!fitsClinicInterval) {
+        return {
+          ok: false,
+          error: `${doctorDay.day}: every doctor time range must fall within clinic opening hours`,
+        };
+      }
+    }
   }
+
   return { ok: true };
 }
+
 /**
- * Calculate the effective doctor schedule by intersecting
- * the doctor's own availability with the clinic's opening hours.
- *
- * The original doctor schedule is never modified.
+ * Calculates patient-facing hours by intersecting the doctor's schedule
+ * with clinic hours. It never expands the doctor's saved hours.
  */
 export function intersectSchedules(
   doctorSchedule: DayHours[],
   clinicSchedule: DayHours[]
 ): DayHours[] {
-  const clinicByDay = new Map(
-    clinicSchedule.map((entry) => [entry.day, entry])
-  );
+  const clinicByDay = new Map(clinicSchedule.map((entry) => [entry.day, entry]));
 
   return doctorSchedule.map((doctorDay) => {
     const clinicDay = clinicByDay.get(doctorDay.day);
 
-    if (
-      doctorDay.closed ||
-      !clinicDay ||
-      clinicDay.closed
-    ) {
+    if (doctorDay.closed || !clinicDay || clinicDay.closed) {
       return {
         ...doctorDay,
         closed: true,
+        intervals: [],
       };
     }
 
-    const openMinutes = Math.max(
-      toMinutes(doctorDay.open),
-      toMinutes(clinicDay.open)
-    );
+    const doctorIntervals = intervalsForDay(doctorDay);
+    const clinicIntervals = intervalsForDay(clinicDay);
+    const intersections: TimeInterval[] = [];
 
-    const closeMinutes = Math.min(
-      toMinutes(doctorDay.close),
-      toMinutes(clinicDay.close)
-    );
+    for (const doctorInterval of doctorIntervals) {
+      for (const clinicInterval of clinicIntervals) {
+        const start = Math.max(
+          toMinutes(doctorInterval.open),
+          toMinutes(clinicInterval.open)
+        );
+        const end = Math.min(
+          toMinutes(doctorInterval.close),
+          toMinutes(clinicInterval.close)
+        );
 
-    if (openMinutes >= closeMinutes) {
-      return {
-        ...doctorDay,
-        closed: true,
-      };
+        if (start < end) {
+          intersections.push({
+            open: minutesToTime(start),
+            close: minutesToTime(end),
+          });
+        }
+      }
     }
+
+    const intervals = normalizeIntervals(intersections);
+    const first = intervals[0];
+    const last = intervals[intervals.length - 1];
 
     return {
       ...doctorDay,
-      open: minutesToTime(openMinutes),
-      close: minutesToTime(closeMinutes),
-      closed: false,
+      open: first?.open ?? doctorDay.open,
+      close: last?.close ?? doctorDay.close,
+      closed: intervals.length === 0,
+      intervals,
     };
   });
 }
 
-/** Default appointment slot length, in minutes. */
+/** Default appointment slot length. */
 export const SLOT_MINUTES = 30;
 
-/** The weekday name (in DAYS form) for a given date. */
+/** Weekday name for a date. */
 export function dayOfWeek(date: Date): Day {
-  // JS getDay(): 0 = Sunday … 6 = Saturday. DAYS starts on Monday.
   const map: Day[] = [
-    'Sunday',
-    'Monday',
-    'Tuesday',
-    'Wednesday',
-    'Thursday',
-    'Friday',
-    'Saturday',
+    "Sunday",
+    "Monday",
+    "Tuesday",
+    "Wednesday",
+    "Thursday",
+    "Friday",
+    "Saturday",
   ];
+
   return map[date.getDay()];
 }
 
-/** The end time of a slot that starts at "HH:MM" and lasts `step` minutes. */
-export function slotEnd(start: string, step: number = SLOT_MINUTES): string {
-  const mins = toMinutes(start);
-  if (Number.isNaN(mins)) return start;
-  return minutesToTime(mins + step);
+/** End time of a slot that starts at `start`. */
+export function slotEnd(
+  start: string,
+  step: number = SLOT_MINUTES
+): string {
+  const minutes = toMinutes(start);
+  if (Number.isNaN(minutes)) return start;
+
+  return minutesToTime(minutes + step);
 }
 
-export function minutesToTime(total: number): string {
-  const h = Math.floor(total / 60);
-  const m = total % 60;
-  return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
-}
-
-/**
- * All slot start times ("HH:MM") for one day's working window, stepping by
- * `step` minutes. A slot is only emitted if a full `step` fits before close, so
- * a 09:00–09:20 window yields nothing at a 30-min step. Closed days yield [].
- */
-export function slotsForDay(entry: DayHours, step: number = SLOT_MINUTES): string[] {
-  if (entry.closed) return [];
-  const start = toMinutes(entry.open);
-  const end = toMinutes(entry.close);
-  if (Number.isNaN(start) || Number.isNaN(end) || start >= end) return [];
+/** Slots that fit fully inside any of this day's working intervals. */
+export function slotsForDay(
+  entry: DayHours,
+  step: number = SLOT_MINUTES
+): string[] {
+  if (entry.closed || !Number.isFinite(step) || step <= 0) return [];
 
   const slots: string[] = [];
-  for (let t = start; t + step <= end; t += step) {
-    slots.push(minutesToTime(t));
+
+  for (const interval of intervalsForDay(entry)) {
+    const start = toMinutes(interval.open);
+    const end = toMinutes(interval.close);
+
+    for (let time = start; time + step <= end; time += step) {
+      slots.push(minutesToTime(time));
+    }
   }
-  return slots;
+
+  return [...new Set(slots)].sort(
+    (a, b) => toMinutes(a) - toMinutes(b)
+  );
 }
 
-/**
- * Free slots for a doctor on the weekday of `date`: every slot the doctor's
- * schedule allows, minus the ones already taken. `taken` is a set of "HH:MM".
- */
+/** Free slots for a doctor on the weekday of `date`. */
 export function availableSlots(
   schedule: DayHours[],
   date: Date,
@@ -240,17 +429,81 @@ export function availableSlots(
   step: number = SLOT_MINUTES
 ): string[] {
   const day = dayOfWeek(date);
-  const entry = schedule.find((s) => s.day === day);
+  const entry = schedule.find((item) => item.day === day);
+
   if (!entry) return [];
+
   return slotsForDay(entry, step).filter((slot) => !taken.has(slot));
 }
 
-/** Read a submitted week out of FormData using `${prefix}-<day>-{open,close,off}`. */
-export function weekFromFormData(formData: FormData, prefix: string): DayHours[] {
+/**
+ * Reads a week from FormData.
+ *
+ * New interval field names:
+ *   `${prefix}-${day}-interval-count`
+ *   `${prefix}-${day}-interval-${index}-open`
+ *   `${prefix}-${day}-interval-${index}-close`
+ *
+ * Falls back to the old one-range field names for existing forms.
+ */
+export function weekFromFormData(
+  formData: FormData,
+  prefix: string
+): DayHours[] {
   return DAYS.map((day) => {
-    const closed = formData.get(`${prefix}-${day}-off`) === 'on';
-    const open = String(formData.get(`${prefix}-${day}-open`) ?? '09:00');
-    const close = String(formData.get(`${prefix}-${day}-close`) ?? '17:00');
-    return { day, open, close, closed };
+    const closed = formData.get(`${prefix}-${day}-off`) === "on";
+    const countValue = formData.get(`${prefix}-${day}-interval-count`);
+
+    if (closed) {
+      return {
+        day,
+        open: "09:00",
+        close: "17:00",
+        closed: true,
+        intervals: [],
+      };
+    }
+
+    if (countValue !== null) {
+      const count = Number(countValue);
+      const safeCount =
+        Number.isInteger(count) && count >= 0 && count <= 8 ? count : 0;
+
+      const intervals: TimeInterval[] = [];
+
+      for (let index = 0; index < safeCount; index += 1) {
+        intervals.push({
+          open: String(
+            formData.get(`${prefix}-${day}-interval-${index}-open`) ?? ""
+          ),
+          close: String(
+            formData.get(`${prefix}-${day}-interval-${index}-close`) ?? ""
+          ),
+        });
+      }
+
+      return {
+        day,
+        open: intervals[0]?.open ?? "09:00",
+        close: intervals[intervals.length - 1]?.close ?? "17:00",
+        closed: false,
+        intervals,
+      };
+    }
+
+    const open = String(
+      formData.get(`${prefix}-${day}-open`) ?? "09:00"
+    );
+    const close = String(
+      formData.get(`${prefix}-${day}-close`) ?? "17:00"
+    );
+
+    return {
+      day,
+      open,
+      close,
+      closed: false,
+      intervals: [{ open, close }],
+    };
   });
 }

@@ -1,9 +1,9 @@
-import mongoose, { Schema, Document, Model } from 'mongoose';
-import { type DayHours, defaultWeek } from '@/lib/schedule';
+import mongoose, { Schema, Document, Model } from "mongoose";
+import { type DayHours, defaultWeek } from "@/lib/schedule";
 
 export interface IDoctor extends Document {
   name: string;
-  nameAr:string;
+  nameAr: string;
   specialty: string;
   email: string;
   phone?: string;
@@ -13,40 +13,60 @@ export interface IDoctor extends Document {
   experience: string;
   successRate: number;
   totalPatients: number;
-  // The doctor's weekly availability *within* the clinic. `closed` on a day
-  // means the doctor is off that day. Kept within clinic hours at write time.
   schedule: DayHours[];
-  /** Clinic-hours version the doctor last acknowledged. */
   clinicHoursAcknowledgedVersion: string;
-  status: 'active' | 'inactive';
-  availability: 'available' | 'on-leave';
+  status: "active" | "inactive";
+  availability: "available" | "on-leave";
   joinedDate: Date;
-  /** The login account (role 'doctor') this profile belongs to, once the admin enables one. */
   user?: mongoose.Types.ObjectId;
   createdAt: Date;
   updatedAt: Date;
 }
 
+const TimeIntervalSchema = new Schema(
+  {
+    open: { type: String, required: true },
+    close: { type: String, required: true },
+  },
+  { _id: false }
+);
+
+const DayHoursSchema = new Schema<DayHours>(
+  {
+    day: { type: String, required: true },
+    open: { type: String, default: "09:00" },
+    close: { type: String, default: "17:00" },
+    closed: { type: Boolean, default: false },
+
+    // Undefined by default so older records can still use open/close.
+    intervals: {
+      type: [TimeIntervalSchema],
+      default: undefined,
+    },
+  },
+  { _id: false }
+);
+
 const DoctorSchema = new Schema<IDoctor>(
   {
     name: {
       type: String,
-      required: [true, 'Please provide a doctor name'],
+      required: [true, "Please provide a doctor name"],
       trim: true,
     },
-     nameAr: {
+    nameAr: {
       type: String,
       trim: true,
-      default: '',
+      default: "",
     },
     specialty: {
       type: String,
-      required: [true, 'Please provide a specialty'],
+      required: [true, "Please provide a specialty"],
       trim: true,
     },
     email: {
       type: String,
-      required: [true, 'Please provide an email'],
+      required: [true, "Please provide an email"],
       unique: true,
       lowercase: true,
       trim: true,
@@ -70,7 +90,7 @@ const DoctorSchema = new Schema<IDoctor>(
     },
     experience: {
       type: String,
-      default: '0 Years',
+      default: "0 Years",
     },
     successRate: {
       type: Number,
@@ -83,32 +103,22 @@ const DoctorSchema = new Schema<IDoctor>(
       default: 0,
     },
     schedule: {
-      type: [
-        new Schema<DayHours>(
-          {
-            day: { type: String, required: true },
-            open: { type: String, default: '09:00' },
-            close: { type: String, default: '17:00' },
-            closed: { type: Boolean, default: false },
-          },
-          { _id: false }
-        ),
-      ],
+      type: [DayHoursSchema],
       default: defaultWeek,
     },
     clinicHoursAcknowledgedVersion: {
       type: String,
-      default: '',
+      default: "",
     },
     status: {
       type: String,
-      enum: ['active', 'inactive'],
-      default: 'active',
+      enum: ["active", "inactive"],
+      default: "active",
     },
     availability: {
       type: String,
-      enum: ['available', 'on-leave'],
-      default: 'available',
+      enum: ["available", "on-leave"],
+      default: "available",
     },
     joinedDate: {
       type: Date,
@@ -116,7 +126,7 @@ const DoctorSchema = new Schema<IDoctor>(
     },
     user: {
       type: Schema.Types.ObjectId,
-      ref: 'User',
+      ref: "User",
       unique: true,
       sparse: true,
     },
@@ -126,6 +136,8 @@ const DoctorSchema = new Schema<IDoctor>(
   }
 );
 
-const Doctor: Model<IDoctor> = mongoose.models.Doctor || mongoose.model<IDoctor>('Doctor', DoctorSchema);
+const Doctor: Model<IDoctor> =
+  mongoose.models.Doctor ||
+  mongoose.model<IDoctor>("Doctor", DoctorSchema);
 
 export default Doctor;

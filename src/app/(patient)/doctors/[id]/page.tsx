@@ -1,124 +1,106 @@
+import { notFound } from "next/navigation";
+import { isValidObjectId } from "mongoose";
 
-import { notFound } from "next/navigation"
-import { isValidObjectId } from "mongoose"
+import connectDB from "@/lib/mongodb";
+import { requireRole } from "@/lib/session";
+import { intersectSchedules, normalizeWeek } from "@/lib/schedule";
+import { getClinicHours } from "@/lib/clinic-hours";
 
-import connectDB from "@/lib/mongodb"
-import { requireRole } from "@/lib/session"
-import { intersectSchedules, normalizeWeek } from "@/lib/schedule"
-import { getClinicHours } from "@/lib/clinic-hours"
+import Doctor from "@/models/Doctor";
+import Appointment from "@/models/Appointment";
 
-import Doctor from "@/models/Doctor"
-import Appointment from "@/models/Appointment"
+import DoctorProfileDisplay from "./doctor-profile-display";
 
-import DoctorProfileDisplay from "./doctor-profile-display"
+export const dynamic = "force-dynamic";
 
-export const dynamic = "force-dynamic"
-
-const CONSULTATION_FEE = 120
+const CONSULTATION_FEE = 120;
 
 export default async function DoctorProfilePage({
-    params,
+  params,
 }: {
-    params: Promise<{ id: string }>
+  params: Promise<{ id: string }>;
 }) {
-    await requireRole("patient")
+  await requireRole("patient");
 
-    const { id } = await params
+  const { id } = await params;
 
-    if (!isValidObjectId(id)) notFound()
+  if (!isValidObjectId(id)) notFound();
 
-    await connectDB()
+  await connectDB();
 
-    const doctor = await Doctor.findById(id).lean()
+  const doctor = await Doctor.findById(id).lean();
 
-    if (!doctor) notFound()
+  if (!doctor) notFound();
 
-    // Calculate doctor statistics from real appointment records
-    const [appointmentCounts, uniquePatients] = await Promise.all([
-        Appointment.aggregate([
-            {
-                $match: {
-                    doctor: doctor._id,
-                    status: { $in: ["completed", "missed"] },
-                },
-            },
-            {
-                $group: {
-                    _id: "$status",
-                    count: { $sum: 1 },
-                },
-            },
-        ]),
+  const [appointmentCounts, uniquePatients] = await Promise.all([
+    Appointment.aggregate([
+      {
+        $match: {
+          doctor: doctor._id,
+          status: { $in: ["completed", "missed"] },
+        },
+      },
+      {
+        $group: {
+          _id: "$status",
+          count: { $sum: 1 },
+        },
+      },
+    ]),
+    Appointment.distinct("patient", {
+      doctor: doctor._id,
+      status: "completed",
+    }),
+  ]);
 
-        Appointment.distinct("patient", {
-            doctor: doctor._id,
-            status: "completed",
-        }),
-    ])
+  const completedCount =
+    appointmentCounts.find((item) => item._id === "completed")?.count ?? 0;
 
-    const completedCount =
-        appointmentCounts.find(
-            (item) => item._id === "completed"
-        )?.count ?? 0
+  const missedCount =
+    appointmentCounts.find((item) => item._id === "missed")?.count ?? 0;
 
-    const missedCount =
-        appointmentCounts.find(
-            (item) => item._id === "missed"
-        )?.count ?? 0
+  const totalEligibleAppointments = completedCount + missedCount;
 
-    const totalEligibleAppointments =
-        completedCount + missedCount
+  const successRate =
+    totalEligibleAppointments > 0
+      ? Math.round((completedCount / totalEligibleAppointments) * 100)
+      : null;
 
-    const successRate =
-        totalEligibleAppointments > 0
-            ? Math.round(
-                  (completedCount / totalEligibleAppointments) * 100
-              )
-            : null
+  const totalPatients = uniquePatients.length;
 
-    const totalPatients = uniquePatients.length
+  // Patients see only the overlap between doctor hours and clinic hours.
+  const schedule = intersectSchedules(
+    normalizeWeek(doctor.schedule),
+    await getClinicHours()
+  );
 
-    // Temporary debugging logs
-    console.log("DOCTOR ID:", String(doctor._id))
-    console.log("COMPLETED:", completedCount)
-    console.log("MISSED:", missedCount)
-    console.log(
-        "UNIQUE COMPLETED PATIENTS:",
-        uniquePatients.map(String)
-    )
-    console.log("TOTAL PATIENTS:", totalPatients)
-    console.log("SUCCESS RATE:", successRate)
+  const workingDays = schedule
+    .filter((day) => !day.closed)
+    .map((day) => ({
+      day: day.day,
+      intervals:
+        day.intervals ??
+        (day.open && day.close
+          ? [{ open: day.open, close: day.close }]
+          : []),
+    }));
 
-    // Show patients only the hours during which both the clinic and doctor are open.
-    const schedule = intersectSchedules(
-        normalizeWeek(doctor.schedule),
-        await getClinicHours(),
-    )
-
-    const workingDays = schedule
-        .filter((day) => !day.closed)
-        .map((day) => ({
-            day: String(day.day),
-            open: String(day.open),
-            close: String(day.close),
-        }))
-
-    return (
-        <DoctorProfileDisplay
-            doctor={{
-                id: String(doctor._id),
-                name: doctor.name,
-                nameAr: doctor.nameAr || "",
-                image: doctor.image || "",
-                specialty: doctor.specialty,
-                experience: doctor.experience,
-                successRate,
-                totalPatients,
-                active: doctor.status === "active",
-            }}
-            workingDays={workingDays}
-            openWeekdays={workingDays.map((day) => day.day)}
-            consultationFee={CONSULTATION_FEE}
-        />
-    )
+  return (
+    <DoctorProfileDisplay
+      doctor={{
+        id: String(doctor._id),
+        name: doctor.name,
+        nameAr: doctor.nameAr || "",
+        image: doctor.image || "",
+        specialty: doctor.specialty,
+        experience: doctor.experience,
+        successRate,
+        totalPatients,
+        active: doctor.status === "active",
+      }}
+      workingDays={workingDays}
+      openWeekdays={workingDays.map((day) => day.day)}
+      consultationFee={CONSULTATION_FEE}
+    />
+  );
 }

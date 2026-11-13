@@ -72,6 +72,7 @@ export type AdminAppointment = {
         | "completed"
         | "cancelled"
         | "missed"
+    needsScheduleReview: boolean
     type: "video" | "in-person"
     price: string
     startedAt?: string
@@ -414,6 +415,11 @@ export function AppointmentsTable({
                                         <Badge variant={badgeVariant(app.status)}>
                                             {t(language, STATUS_LABEL[app.status])}
                                         </Badge>
+                                        {app.needsScheduleReview && (
+                                            <p className="mt-1 text-xs font-medium text-amber-700">
+                                                {t(language, "Schedule conflict — review required")}
+                                            </p>
+                                        )}
                                     </TableCell>
 
                                     {/* Quick actions */}
@@ -778,10 +784,12 @@ function RowActions({ app }: { app: AdminAppointment }) {
     const [showCancelForm, setShowCancelForm] = useState(false)
     const [cancellationReason, setCancellationReason] = useState("")
 
-    const canConfirm = app.status === "pending"
+    const canConfirm =
+        app.status === "pending" && !app.needsScheduleReview
 
     const canStart =
-        app.status === "pending" || app.status === "confirmed"
+        !app.needsScheduleReview &&
+        (app.status === "pending" || app.status === "confirmed")
 
     const canComplete = app.status === "in-progress"
 

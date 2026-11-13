@@ -5,9 +5,8 @@ import DoctorScheduleRequest from "@/models/DoctorScheduleRequest"
 import { appointmentHasPassed } from "@/lib/appointment-transitions"
 import {
     DAYS,
-    SLOT_MINUTES,
     normalizeWeek,
-    toMinutes,
+    slotsForDay,
 } from "@/lib/schedule"
 import {
     ScheduleRequestsManager,
@@ -36,14 +35,7 @@ function conflictsWithSchedule(
     const day = DAYS[(date.getUTCDay() + 6) % 7]
     const hours = schedule.find((item) => item.day === day)
 
-    if (!hours || hours.closed) return true
-
-    const start = toMinutes(time)
-    if (!Number.isFinite(start)) return true
-
-    const end = start + SLOT_MINUTES
-
-    return start < toMinutes(hours.open) || end > toMinutes(hours.close)
+    return !hours || hours.closed || !slotsForDay(hours).includes(time)
 }
 
 export default async function ScheduleRequestsPage() {

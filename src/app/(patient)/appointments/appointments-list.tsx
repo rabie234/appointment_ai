@@ -232,7 +232,8 @@ export function AppointmentsList({
         try {
             const result = (await getAvailableSlots(
                 appointment.doctorId,
-                selectedDate
+                selectedDate,
+                appointment.id
             )) as SlotResponse
 
             if (result.onLeave) {
@@ -265,7 +266,7 @@ export function AppointmentsList({
         }
     }
 
-    async function saveReschedule(appointmentId: string) {
+    async function saveReschedule(appointment: AppointmentCard) {
         if (!selectedDate || !selectedTime) {
             setMessage(
                 isArabic
@@ -280,7 +281,7 @@ export function AppointmentsList({
 
         try {
             const result = await rescheduleLeaveConflictAppointment(
-                appointmentId,
+                appointment.id,
                 selectedDate,
                 selectedTime
             )
@@ -295,10 +296,15 @@ export function AppointmentsList({
                 return
             }
 
+            const needsConfirmation = appointment.statusLabel === "Confirmed"
             window.alert(
-                isArabic
-                    ? "تمت إعادة جدولة الموعد بنجاح."
-                    : "Appointment rescheduled successfully."
+                needsConfirmation
+                    ? isArabic
+                        ? "تم اختيار الموعد الجديد. سيبقى قيد الانتظار إلى أن تؤكده العيادة."
+                        : "The new time was selected. The appointment is pending clinic confirmation."
+                    : isArabic
+                        ? "تم تحديث وقت الموعد."
+                        : "The appointment time was updated."
             )
 
             closeReschedule()
@@ -637,9 +643,7 @@ export function AppointmentsList({
                                                                                     !selectedTime
                                                                                 }
                                                                                 onClick={() =>
-                                                                                    saveReschedule(
-                                                                                        app.id
-                                                                                    )
+                                                                                    saveReschedule(app)
                                                                                 }
                                                                             >
                                                                                 {savingReschedule

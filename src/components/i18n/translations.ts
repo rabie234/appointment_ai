@@ -664,7 +664,17 @@ const translations = {
     "No appointment days are currently available.": "لا توجد أيام متاحة لحجز المواعيد حاليًا.",
     "Day": "اليوم",
         "Notification: Clinic hours updated": "تم تحديث ساعات المركز",
-    "Notification body: The clinic updated its working hours. Review the change on your Working Hours page. Your saved schedule will not be changed; patient availability follows both schedules.": "حدّث المركز ساعات العمل. راجع التغيير من صفحة ساعات العمل. لن يتغيّر جدولك المحفوظ، وستتبع المواعيد المتاحة للمريض جدولي المركز والطبيب.",
+    "Working hours": "ساعات العمل",
+"Limited by clinic hours": "مقيّدة بساعات المركز",
+"Patient bookable hours": "الأوقات المتاحة لحجز المرضى",
+"Some saved doctor hours fall outside clinic hours. Patient booking is limited to the overlapping times. Reviewing clinic hours does not expand your saved schedule.": "بعض ساعات عملك المحفوظة تقع خارج ساعات المركز. حجز المرضى يقتصر على الأوقات المشتركة بين الجدولين. مراجعة ساعات المركز لا توسّع جدولك المحفوظ.",
+"Clinic hours changed. Your saved doctor hours remain unchanged. Review the update.": "تغيّرت ساعات المركز، وبقي جدولك المحفوظ كما هو. راجع التحديث.",
+"Patient slots follow the overlapping clinic and doctor hours.": "الأوقات المتاحة للمرضى تتبع الأوقات المشتركة بين دوام المركز وجدول الطبيب.",
+"Schedule conflict — review required": "تعارض بالجدول — يتطلب المراجعة",
+"Notification body: A patient selected a new time for an affected appointment. Please review and confirm the new time.": "اختار المريض وقتًا جديدًا لموعد متأثر. يُرجى مراجعة الموعد الجديد وتأكيده.",
+"Notification body: A patient selected a new time for an affected appointment. The appointment is pending confirmation.": "اختار المريض وقتًا جديدًا لموعد متأثر. الموعد بانتظار التأكيد.",
+"Resolve the schedule conflict before confirming or starting this appointment.": "عالج تعارض الجدول قبل تأكيد هذا الموعد أو بدء الزيارة.",
+        "Notification body: The clinic updated its working hours. Review the change on your Working Hours page. Your saved schedule will not be changed; patient availability follows both schedules.": "حدّث المركز ساعات العمل. راجع التغيير من صفحة ساعات العمل. لن يتغيّر جدولك المحفوظ، وستتبع المواعيد المتاحة للمريض جدولي المركز والطبيب.",
 } as const;
 
 export function t(language: Language, text: string): string {

@@ -1,46 +1,47 @@
-"use server"
+"use server";
 
-import { revalidatePath } from "next/cache"
-import connectDB from "@/lib/mongodb"
-import { requireRole } from "@/lib/session"
+import { revalidatePath } from "next/cache";
+import connectDB from "@/lib/mongodb";
+import { requireRole } from "@/lib/session";
 import {
   availableSlots,
+  dayOfWeek,
+  intersectSchedules,
   isValidTime,
   normalizeWeek,
   slotsForDay,
-  dayOfWeek,
-  intersectSchedules,
-} from "@/lib/schedule"
-import Doctor from "@/models/Doctor"
-import Appointment from "@/models/Appointment"
-import DoctorLeave from "@/models/DoctorLeave"
-import { parseCalendarDate as parseDay } from "@/lib/date-validation"
-import mongoose from "mongoose"
-import DoctorScheduleRequest from "@/models/DoctorScheduleRequest"
+} from "@/lib/schedule";
+import Doctor from "@/models/Doctor";
+import Appointment from "@/models/Appointment";
+import DoctorLeave from "@/models/DoctorLeave";
+import { parseCalendarDate as parseDay } from "@/lib/date-validation";
+import mongoose from "mongoose";
+import DoctorScheduleRequest from "@/models/DoctorScheduleRequest";
 import {
   findActiveAppointmentInSpecialty,
   type ActiveSpecialtyAppointment,
-} from "@/lib/booking-policy"
-import { notifyAdmins, notifyUser } from "@/lib/notification-service"
+} from "@/lib/booking-policy";
+import { notifyAdmins, notifyUser } from "@/lib/notification-service";
 import { getClinicHours } from "@/lib/clinic-hours";
 import { isPastClinicSlot } from "@/lib/slots-server";
+
 /** The UTC start and exclusive end of a day. */
 function dayBounds(date: Date): { start: Date; end: Date } {
-  const start = new Date(date)
-  start.setUTCHours(0, 0, 0, 0)
+  const start = new Date(date);
+  start.setUTCHours(0, 0, 0, 0);
 
-  const end = new Date(start)
-  end.setUTCDate(end.getUTCDate() + 1)
+  const end = new Date(start);
+  end.setUTCDate(end.getUTCDate() + 1);
 
-  return { start, end }
+  return { start, end };
 }
 
 /** Times already booked for a doctor on a day. */
 async function bookedTimes(
   doctorId: string,
-  date: Date,
+  date: Date
 ): Promise<Set<string>> {
-  const { start, end } = dayBounds(date)
+  const { start, end } = dayBounds(date);
 
   const existing = await Appointment.find({
     doctor: doctorId,
@@ -48,17 +49,17 @@ async function bookedTimes(
     status: { $ne: "cancelled" },
   })
     .select("time")
-    .lean()
+    .lean();
 
-  return new Set(existing.map((appointment) => appointment.time))
+  return new Set(existing.map((appointment) => appointment.time));
 }
 
 /** True only for approved leave and older records that have no status field. */
 async function isDoctorOnLeave(
   doctorId: string,
-  date: Date,
+  date: Date
 ): Promise<boolean> {
-  const { start, end } = dayBounds(date)
+  const { start, end } = dayBounds(date);
 
   const leave = await DoctorLeave.findOne({
     doctor: doctorId,
@@ -70,50 +71,47 @@ async function isDoctorOnLeave(
     ],
   })
     .select("_id")
-    .lean()
+    .lean();
 
-  return Boolean(leave)
+  return Boolean(leave);
 }
 
 export type SlotsResult = {
-  slots?: string[]
-  error?: string
-  onLeave?: boolean
-}
+  slots?: string[];
+  error?: string;
+  onLeave?: boolean;
+};
 
-/**
- * Gets available slots for a date. A signed-in patient is required.
- */
 export async function getAvailableSlots(
   doctorId: string,
   dateStr: string,
   appointmentId?: string
 ): Promise<SlotsResult> {
-  const session = await requireRole("patient")
+  const session = await requireRole("patient");
 
-  const date = parseDay(dateStr)
-  if (!date) return { error: "Invalid date" }
+  const date = parseDay(dateStr);
+  if (!date) return { error: "Invalid date" };
 
-  await connectDB()
+  await connectDB();
 
   const doctor = await Doctor.findById(doctorId)
     .select("schedule status")
-    .lean()
+    .lean();
 
-
-  if (!doctor) return { error: "Doctor not found" }
-  if (doctor.status !== "active") return { slots: [] }
+  if (!doctor) return { error: "Doctor not found" };
+  if (doctor.status !== "active") return { slots: [] };
 
   if (await isDoctorOnLeave(doctorId, date)) {
-    return { slots: [], onLeave: true }
+    return { slots: [], onLeave: true };
   }
 
-  let schedule = normalizeWeek(doctor.schedule)
+  let schedule = normalizeWeek(doctor.schedule);
 
   if (appointmentId) {
     if (!mongoose.Types.ObjectId.isValid(appointmentId)) {
-      return { slots: [], error: "Invalid appointment" }
+      return { slots: [], error: "Invalid appointment" };
     }
+
     const appointment = await Appointment.findOne({
       _id: appointmentId,
       patient: session.user.id,
@@ -121,13 +119,13 @@ export async function getAvailableSlots(
       status: { $in: ["pending", "confirmed"] },
     })
       .select("scheduleChangeRequestId")
-      .lean()
+      .lean();
 
     if (!appointment) {
       return {
         slots: [],
         error: "Appointment not found or no longer needs rescheduling",
-      }
+      };
     }
 
     if (appointment.scheduleChangeRequestId) {
@@ -137,52 +135,53 @@ export async function getAvailableSlots(
         status: "pending",
       })
         .select("requestedSchedule")
-        .lean()
+        .lean();
 
       if (!scheduleRequest) {
         return {
           slots: [],
           error: "The schedule-change request is no longer active.",
-        }
+        };
       }
 
-      schedule = normalizeWeek(scheduleRequest.requestedSchedule)
+      schedule = normalizeWeek(scheduleRequest.requestedSchedule);
     }
   }
 
-  // Patient availability always respects both the doctor's saved schedule
-  // and the current clinic hours. The saved doctor schedule is never changed.
-  schedule = intersectSchedules(schedule, await getClinicHours())
+  // Patient availability is limited to the overlap. This does not modify
+  // the doctor's saved schedule.
+  schedule = intersectSchedules(schedule, await getClinicHours());
 
-  const taken = await bookedTimes(doctorId, date)
+  const taken = await bookedTimes(doctorId, date);
 
   return {
     slots: availableSlots(schedule, date, taken).filter(
-      (time) => !isPastClinicSlot(dateStr, time),
+      (time) => !isPastClinicSlot(dateStr, time)
     ),
-  }
+  };
 }
-/** Returns only dates covered by approved leave or older status-less records. */
+
+/** Returns dates covered by approved leave or older status-less records. */
 export async function getDoctorLeaveDates(
   doctorId: string,
-  dateStrings: string[],
+  dateStrings: string[]
 ): Promise<string[]> {
-  await requireRole("patient")
-  await connectDB()
+  await requireRole("patient");
+  await connectDB();
 
   const dates = dateStrings
     .map(parseDay)
-    .filter((date): date is Date => date !== null)
+    .filter((date): date is Date => date !== null);
 
-  if (dates.length === 0) return []
+  if (dates.length === 0) return [];
 
   const firstDay = new Date(
-    Math.min(...dates.map((date) => date.getTime())),
-  )
+    Math.min(...dates.map((date) => date.getTime()))
+  );
   const lastDay = new Date(
-    Math.max(...dates.map((date) => date.getTime())),
-  )
-  lastDay.setUTCDate(lastDay.getUTCDate() + 1)
+    Math.max(...dates.map((date) => date.getTime()))
+  );
+  lastDay.setUTCDate(lastDay.getUTCDate() + 1);
 
   const leaves = await DoctorLeave.find({
     doctor: doctorId,
@@ -194,124 +193,122 @@ export async function getDoctorLeaveDates(
     ],
   })
     .select("startDate endDate")
-    .lean()
+    .lean();
 
   return dates
     .filter((date) =>
       leaves.some((leave) => {
-        const start = new Date(leave.startDate)
-        const end = new Date(leave.endDate)
+        const start = new Date(leave.startDate);
+        const end = new Date(leave.endDate);
 
-        start.setUTCHours(0, 0, 0, 0)
-        end.setUTCHours(0, 0, 0, 0)
+        start.setUTCHours(0, 0, 0, 0);
+        end.setUTCHours(0, 0, 0, 0);
 
-        return date >= start && date < end
-      }),
+        return date >= start && date < end;
+      })
     )
-    .map((date) => date.toISOString().slice(0, 10))
+    .map((date) => date.toISOString().slice(0, 10));
 }
 
 export type BookingState = {
-  error?: string
-  success?: boolean
-  existingAppointment?: ActiveSpecialtyAppointment
-}
+  error?: string;
+  success?: boolean;
+  existingAppointment?: ActiveSpecialtyAppointment;
+};
 
-const CONSULTATION_FEE = 120
+const CONSULTATION_FEE = 120;
 
-/**
- * Books an appointment after validating the doctor, date, schedule,
- * approved leave, and current slot availability on the server.
- */
 export async function bookAppointment(
   _prev: BookingState,
-  formData: FormData,
+  formData: FormData
 ): Promise<BookingState> {
-  const session = await requireRole("patient")
+  const session = await requireRole("patient");
 
-  const doctorId = String(formData.get("doctorId") ?? "")
-  const dateStr = String(formData.get("date") ?? "")
-  const time = String(formData.get("time") ?? "")
-  const type = String(formData.get("type") ?? "in-person")
+  const doctorId = String(formData.get("doctorId") ?? "");
+  const dateStr = String(formData.get("date") ?? "");
+  const time = String(formData.get("time") ?? "");
+  const type = String(formData.get("type") ?? "in-person");
 
   if (!doctorId || !dateStr || !time) {
-    return { error: "Please choose a date and time" }
+    return { error: "Please choose a date and time" };
   }
 
-  const date = parseDay(dateStr)
-  if (!date) return { error: "Invalid date" }
-  if (!isValidTime(time)) return { error: "Invalid time" }
+  const date = parseDay(dateStr);
+  if (!date) return { error: "Invalid date" };
+  if (!isValidTime(time)) return { error: "Invalid time" };
 
   if (isPastClinicSlot(dateStr, time)) {
-    return { error: "That time has already passed. Please choose another slot." }
+    return {
+      error: "That time has already passed. Please choose another slot.",
+    };
   }
 
-  const today = new Date()
-  today.setUTCHours(0, 0, 0, 0)
+  const today = new Date();
+  today.setUTCHours(0, 0, 0, 0);
 
   if (date < today) {
-    return { error: "That date has already passed" }
+    return { error: "That date has already passed" };
   }
 
-  const appointmentType = type === "video" ? "video" : "in-person"
+  const appointmentType = type === "video" ? "video" : "in-person";
 
-  await connectDB()
+  await connectDB();
 
   const doctor = await Doctor.findById(doctorId)
     .select("schedule status specialty")
-    .lean()
+    .lean();
 
-  if (!doctor) return { error: "Doctor not found" }
+  if (!doctor) return { error: "Doctor not found" };
 
   if (doctor.status !== "active") {
-    return { error: "This doctor is not accepting appointments" }
+    return { error: "This doctor is not accepting appointments" };
   }
 
   const existingAppointment = await findActiveAppointmentInSpecialty(
     session.user.id,
-    doctor.specialty ?? "",
-  )
+    doctor.specialty ?? ""
+  );
+
   if (existingAppointment) {
     return {
       error:
         "You already have an active appointment in this specialty. Finish or cancel it before booking another.",
       existingAppointment,
-    }
+    };
   }
 
   if (await isDoctorOnLeave(doctorId, date)) {
     return {
       error: "The doctor is on leave on this date. Please choose another date.",
-    }
+    };
   }
 
- const doctorSchedule = normalizeWeek(doctor.schedule);
-const clinicSchedule = await getClinicHours();
+  const doctorSchedule = normalizeWeek(doctor.schedule);
+  const clinicSchedule = await getClinicHours();
+  const effectiveSchedule = intersectSchedules(
+    doctorSchedule,
+    clinicSchedule
+  );
 
-const effectiveSchedule = intersectSchedules(
-  doctorSchedule,
-  clinicSchedule
-);
-
-const day = dayOfWeek(date);
-const entry = effectiveSchedule.find((item) => item.day === day);
+  const day = dayOfWeek(date);
+  const entry = effectiveSchedule.find((item) => item.day === day);
 
   if (!entry || entry.closed || !slotsForDay(entry).includes(time)) {
-    return { error: "The doctor is not available at that time" }
+    return { error: "The doctor is not available at that time" };
   }
 
-  const taken = await bookedTimes(doctorId, date)
+  const taken = await bookedTimes(doctorId, date);
 
-  // Recheck immediately before writing in case the selected slot passed while
-  // the availability and database checks were running.
   if (isPastClinicSlot(dateStr, time)) {
-    return { error: "That time has already passed. Please choose another slot." }
+    return {
+      error: "That time has already passed. Please choose another slot.",
+    };
   }
 
   if (taken.has(time)) {
     return {
       error: "That slot was just taken. Please pick another time.",
-    }
+    };
   }
 
   try {
@@ -323,7 +320,7 @@ const entry = effectiveSchedule.find((item) => item.day === day);
       type: appointmentType,
       status: "pending",
       price: CONSULTATION_FEE,
-    })
+    });
   } catch (error: unknown) {
     if (
       typeof error === "object" &&
@@ -333,34 +330,37 @@ const entry = effectiveSchedule.find((item) => item.day === day);
     ) {
       return {
         error: "That slot was just taken. Please pick another time.",
-      }
+      };
     }
 
-    console.error("Book appointment failed:", error)
+    console.error("Book appointment failed:", error);
 
     return {
       error: "Could not book the appointment. Please try again.",
-    }
+    };
   }
 
-  const context = dateStr + " · " + time
+  const context = `${dateStr} · ${time}`;
+
   await Promise.all([
     notifyUser(session.user.id, {
       category: "appointment",
       titleKey: "Notification: Appointment request received",
-      bodyKey: "Notification body: The clinic received your appointment request.",
+      bodyKey:
+        "Notification body: The clinic received your appointment request.",
       href: "/appointments",
       context,
     }),
     notifyAdmins({
       category: "appointment",
       titleKey: "Notification: New appointment request",
-      bodyKey: "Notification body: A patient submitted an appointment request that needs confirmation.",
+      bodyKey:
+        "Notification body: A patient submitted an appointment request that needs confirmation.",
       href: "/admin/appointments",
       context,
     }),
-  ])
+  ]);
 
-  revalidatePath("/appointments")
-  return { success: true }
+  revalidatePath("/appointments");
+  return { success: true };
 }

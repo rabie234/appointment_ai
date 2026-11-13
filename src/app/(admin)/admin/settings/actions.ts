@@ -1,86 +1,104 @@
+"use server";
 
-'use server';
-
-import { revalidatePath } from 'next/cache';
-import connectDB from '@/lib/mongodb';
-import { requireRole } from '@/lib/session';
-import ClinicHours from '@/models/ClinicHours';
-import Appointment from '@/models/Appointment';
-import Doctor from '@/models/Doctor';
+import { revalidatePath } from "next/cache";
+import connectDB from "@/lib/mongodb";
+import { requireRole } from "@/lib/session";
+import ClinicHours from "@/models/ClinicHours";
+import Appointment from "@/models/Appointment";
+import Doctor from "@/models/Doctor";
 import {
+  dayOfWeek,
+  intersectSchedules,
+  normalizeWeek,
+  slotsForDay,
   validateWeek,
   weekFromFormData,
-  dayOfWeek,
-  slotsForDay,
-} from '@/lib/schedule';
-import { notifyAppointmentParties, notifyUser } from '@/lib/notification-service';
+} from "@/lib/schedule";
+import {
+  notifyAdmins,
+  notifyAppointmentParties,
+  notifyUser,
+} from "@/lib/notification-service";
 
-export type ClinicHoursState = { error?: string; success?: boolean };
+export type ClinicHoursState = {
+  error?: string;
+  success?: boolean;
+};
+
+function comparableHours(hours: unknown) {
+  return normalizeWeek(hours).map((entry) => [
+    entry.day,
+    entry.closed,
+    ...(entry.intervals ?? []).map(
+      (interval) => `${interval.open}-${interval.close}`
+    ),
+  ]);
+}
 
 /**
- * Persist the clinic's weekly opening hours and detect
- * future appointments affected by the new clinic hours.
+ * Saves clinic opening hours, notifies doctors, and flags future appointments
+ * that no longer fit within both the doctor's schedule and clinic hours.
  */
 export async function updateClinicHours(
   _prev: ClinicHoursState,
   formData: FormData
 ): Promise<ClinicHoursState> {
-  await requireRole('admin');
+  await requireRole("admin");
 
-  const week = weekFromFormData(formData, 'clinic');
-  const check = validateWeek(week);
+  const week = weekFromFormData(formData, "clinic");
+  const validation = validateWeek(week);
 
-  if (!check.ok) {
-    return { error: check.error };
+  if (!validation.ok) {
+    return { error: validation.error };
   }
 
   await connectDB();
 
   try {
-    const previousClinicHours = await ClinicHours.findOne({ key: 'clinic' })
-      .select('hours')
+    const previousClinicHours = await ClinicHours.findOne({ key: "clinic" })
+      .select("hours")
       .lean();
-    const comparableHours = (hours: typeof week) =>
-      [...hours]
-        .sort((a, b) => a.day.localeCompare(b.day))
-        .map(({ day, open, close, closed }) => [
-          day,
-          closed,
-          closed ? '' : open,
-          closed ? '' : close,
-        ]);
+
     const clinicHoursChanged =
       !previousClinicHours ||
       JSON.stringify(comparableHours(previousClinicHours.hours)) !==
         JSON.stringify(comparableHours(week));
 
     await ClinicHours.findOneAndUpdate(
-      { key: 'clinic' },
+      { key: "clinic" },
       {
-        $set: { key: 'clinic', hours: week },
+        $set: { key: "clinic", hours: week },
         ...(clinicHoursChanged ? { $inc: { version: 1 } } : {}),
       },
       { upsert: true, new: true, setDefaultsOnInsert: true }
     );
 
-    // Mark every clinic-closed weekday as off in each doctor's saved schedule.
-    // Keep the time values so an admin can restore them if the clinic reopens it.
-    const closedDays = week.filter((entry) => entry.closed).map((entry) => entry.day);
+    // A clinic-closed weekday becomes a doctor's day off.
+    // Reopening the clinic later does not reopen the doctor's schedule.
+    const closedDays = week
+      .filter((entry) => entry.closed)
+      .map((entry) => entry.day);
+
     await Promise.all(
       closedDays.map((day) =>
         Doctor.updateMany(
-          { 'schedule.day': day },
-          { $set: { 'schedule.$[closedDay].closed': true } },
-          { arrayFilters: [{ 'closedDay.day': day }] },
-        ),
-      ),
+          { "schedule.day": day },
+          {
+            $set: {
+              "schedule.$[closedDay].closed": true,
+              "schedule.$[closedDay].intervals": [],
+            },
+          },
+          { arrayFilters: [{ "closedDay.day": day }] }
+        )
+      )
     );
 
     if (clinicHoursChanged) {
       const doctors = await Doctor.find({
         user: { $exists: true, $ne: null },
       })
-        .select('user')
+        .select("user")
         .lean();
 
       await Promise.all(
@@ -88,11 +106,11 @@ export async function updateClinicHours(
           doctor.user
             ? [
                 notifyUser(String(doctor.user), {
-                  category: 'schedule',
-                  titleKey: 'Notification: Clinic hours updated',
+                  category: "schedule",
+                  titleKey: "Notification: Clinic hours updated",
                   bodyKey:
-                    'Notification body: The clinic updated its working hours. Review and apply them on your Working Hours page.',
-                  href: '/doctor/working-hours',
+                    "Notification body: The clinic changed its working hours. Patient availability follows the overlap between your saved schedule and the clinic hours. Review the update on your Working Hours page.",
+                  href: "/doctor/working-hours",
                 }),
               ]
             : []
@@ -100,113 +118,124 @@ export async function updateClinicHours(
       );
     }
 
-    // Find active future appointments, including those
-    // previously marked as affected.
     const today = new Date();
     today.setUTCHours(0, 0, 0, 0);
 
     const appointments = await Appointment.find({
       date: { $gte: today },
-      status: { $in: ['pending', 'confirmed'] },
+      status: { $in: ["pending", "confirmed"] },
     })
-      .select('_id doctor date time clinicHoursConflict')
+      .select("_id doctor date time clinicHoursConflict")
       .lean();
 
-    const clinicByDay = new Map(
-      week.map((entry) => [entry.day, entry])
-    );
+    const clinicByDay = new Map(week.map((entry) => [entry.day, entry]));
 
     const doctorIds = [
-      ...new Set(appointments.map((appointment) =>
-        String(appointment.doctor)
-      )),
+      ...new Set(
+        appointments.map((appointment) => String(appointment.doctor))
+      ),
     ];
 
-    const doctors = await Doctor.find({
-      _id: { $in: doctorIds },
-    })
-      .select('schedule')
+    const doctors = await Doctor.find({ _id: { $in: doctorIds } })
+      .select("_id schedule")
       .lean();
 
     const doctorById = new Map(
-      doctors.map((doctor) => [String(doctor._id), doctor])
+      doctors.map((doctor) => [
+        String(doctor._id),
+        normalizeWeek(doctor.schedule),
+      ])
     );
 
-    const tasks = appointments.map(async (appointment) => {
-      const appointmentDate = new Date(appointment.date);
-      const day = dayOfWeek(appointmentDate);
-      const clinicDay = clinicByDay.get(day);
+    await Promise.all(
+      appointments.map(async (appointment) => {
+        const day = dayOfWeek(new Date(appointment.date));
+        const clinicDay = clinicByDay.get(day);
+        const doctorSchedule = doctorById.get(
+          String(appointment.doctor)
+        );
+        const doctorDay = doctorSchedule?.find(
+          (entry) => entry.day === day
+        );
 
-      const doctor = doctorById.get(String(appointment.doctor));
+        // Do not guess if the appointment's doctor or schedule is missing.
+        if (!clinicDay || !doctorDay) return;
 
-      // If the doctor or clinic schedule is unavailable,
-      // do not make assumptions about the appointment.
-      if (!doctor || !clinicDay) {
-        return;
-      }
+        const effectiveDay = intersectSchedules(
+          [doctorDay],
+          [clinicDay]
+        )[0];
 
-      const affected =
-        clinicDay.closed ||
-        !slotsForDay(clinicDay).includes(appointment.time);
+        const appointmentIsAvailable =
+          !effectiveDay?.closed &&
+          slotsForDay(effectiveDay).includes(appointment.time);
 
-      if (affected) {
-        // Avoid sending duplicate notifications.
-        if (appointment.clinicHoursConflict === true) {
+        if (appointmentIsAvailable) {
+          if (appointment.clinicHoursConflict === true) {
+            await Appointment.updateOne(
+              { _id: appointment._id, clinicHoursConflict: true },
+              { $set: { clinicHoursConflict: false } }
+            );
+          }
           return;
         }
+
+        if (appointment.clinicHoursConflict === true) return;
 
         const result = await Appointment.updateOne(
           {
             _id: appointment._id,
             clinicHoursConflict: { $ne: true },
           },
+          { $set: { clinicHoursConflict: true } }
+        );
+
+        if (result.modifiedCount === 0) return;
+
+        await notifyAppointmentParties(
+          String(appointment._id),
           {
-            $set: { clinicHoursConflict: true },
+            category: "appointment",
+            titleKey:
+              "Notification: Appointment affected by clinic hours change",
+            bodyKey:
+              "Notification body: Your appointment no longer fits the doctor and clinic working hours. Please choose another time or contact the clinic.",
+            href: "/appointments",
+          },
+          {
+            category: "appointment",
+            titleKey:
+              "Notification: Appointment affected by clinic hours change",
+            bodyKey:
+              "Notification body: An appointment on your schedule no longer fits the doctor and clinic working hours.",
+            href: "/doctor/appointments",
           }
         );
 
-        if (result.modifiedCount > 0) {
-          await notifyAppointmentParties(
-            String(appointment._id),
-            {
-              category: 'appointment',
-              titleKey: 'Notification: Appointment affected by clinic hours change',
-              bodyKey:
-                'Notification body: Your appointment is outside the new clinic opening hours. Please reschedule it.',
-              href: '/appointments',
-            },
-            {
-              category: 'appointment',
-              titleKey: 'Notification: Appointment affected by clinic hours change',
-              bodyKey:
-                'Notification body: An appointment on your schedule is outside the new clinic opening hours.',
-              href: '/doctor/appointments',
-            }
-          );
-        }
-      } else if (appointment.clinicHoursConflict === true) {
-        // Clear the conflict if the new hours make the
-        // appointment valid again.
-        await Appointment.updateOne(
-          { _id: appointment._id, clinicHoursConflict: true },
-          { $set: { clinicHoursConflict: false } }
-        );
-      }
-    });
-
-    await Promise.all(tasks);
+        await notifyAdmins({
+          category: "appointment",
+          titleKey:
+            "Notification: Appointment affected by clinic hours change",
+          bodyKey:
+            "Notification body: A future appointment needs review after the clinic hours changed.",
+          href: "/admin/appointments",
+          context: `${new Date(appointment.date).toISOString().slice(0, 10)} · ${appointment.time}`,
+        });
+      })
+    );
   } catch (error) {
-    console.error('Update clinic hours failed:', error);
+    console.error("Update clinic hours failed:", error);
     return {
-      error: 'Could not save clinic hours or process affected appointments.',
+      error: "Could not save clinic hours or process affected appointments.",
     };
   }
 
-  revalidatePath('/admin/settings');
-  revalidatePath('/admin/doctors');
-  revalidatePath('/admin/appointments');
-  revalidatePath('/appointments');
-  revalidatePath('/doctor/appointments');
+  revalidatePath("/admin/settings");
+  revalidatePath("/admin/doctors");
+  revalidatePath("/admin/appointments");
+  revalidatePath("/appointments");
+  revalidatePath("/doctor/appointments");
+  revalidatePath("/doctor/working-hours");
 
   return { success: true };
 }

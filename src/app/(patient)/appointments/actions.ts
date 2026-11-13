@@ -97,8 +97,8 @@ export async function cancelPatientAppointment(appointmentId: string) {
 }
 
 /**
- * Allows the patient to cancel an appointment affected by doctor leave
- * or a pending working-hours change.
+ * Allows the patient to cancel an appointment affected by clinic hours,
+ * doctor leave, or a pending working-hours change.
  */
 export async function cancelLeaveConflictAppointment(
     appointmentId: string
@@ -133,6 +133,7 @@ export async function cancelLeaveConflictAppointment(
                     status: "cancelled",
                     cancellationReason: "Cancelled by you",
                     leaveConflict: false,
+                    clinicHoursConflict: false,
                 },
                 $unset: {
                     scheduleChangeRequestId: "",
@@ -188,9 +189,9 @@ export async function cancelLeaveConflictAppointment(
 }
 
 /**
- * Reschedules an appointment affected by doctor leave or a pending
- * working-hours change. For a working-hours change, the new time must fit
- * the doctor's proposed schedule.
+ * Reschedules an appointment affected by clinic hours, doctor leave, or a
+ * pending schedule change. A moved confirmed appointment returns to pending
+ * so the clinic must confirm the new time.
  */
 export async function rescheduleLeaveConflictAppointment(
     appointmentId: string,
@@ -245,6 +246,7 @@ export async function rescheduleLeaveConflictAppointment(
             patient: session.user.id,
             status: { $in: ["pending", "confirmed"] },
             $or: [
+                { clinicHoursConflict: true },
                 { leaveConflict: true },
                 {
                     scheduleChangeRequestId: {
@@ -320,15 +322,13 @@ export async function rescheduleLeaveConflictAppointment(
             }
         }
 
-       const clinicSchedule = await getClinicHours();
-
-const effectiveSchedule = intersectSchedules(
-    schedule,
-    clinicSchedule
-);
-
-const day = dayOfWeek(date);
-const entry = effectiveSchedule.find((item) => item.day === day);
+        const clinicSchedule = await getClinicHours();
+        const effectiveSchedule = intersectSchedules(
+            schedule,
+            clinicSchedule
+        );
+        const day = dayOfWeek(date);
+        const entry = effectiveSchedule.find((item) => item.day === day);
 
         if (!entry || entry.closed || !slotsForDay(entry).includes(time)) {
             return {
@@ -356,8 +356,11 @@ const entry = effectiveSchedule.find((item) => item.day === day);
 
         appointment.date = date
         appointment.time = time
+        if (appointment.status === "confirmed") {
+            appointment.status = "pending"
+        }
         appointment.leaveConflict = false
-        appointment.clinicHoursConflict = false;
+        appointment.clinicHoursConflict = false
         appointment.scheduleChangeRequestId = undefined
         await appointment.save()
 
@@ -366,15 +369,15 @@ const entry = effectiveSchedule.find((item) => item.day === day);
             notifyDoctor(String(appointment.doctor), {
                 category: "appointment",
                 titleKey: "Notification: Appointment rescheduled by patient",
-                bodyKey: "Notification body: A patient selected a new time for an appointment.",
+                bodyKey: "Notification body: A patient selected a new time for an affected appointment. Please review and confirm the new time.",
                 href: "/doctor/appointments",
                 context,
             }),
             notifyAdmins({
                 category: "appointment",
                 titleKey: "Notification: Appointment rescheduled by patient",
-                bodyKey: "Notification body: A patient resolved an appointment conflict.",
-                href: "/admin/schedule-requests",
+                bodyKey: "Notification body: A patient selected a new time for an affected appointment. The appointment is pending confirmation.",
+                href: "/admin/appointments",
                 context,
             }),
         ])

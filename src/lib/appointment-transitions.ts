@@ -47,8 +47,21 @@ export async function applyTransition(options: {
   const appt = await Appointment.findOne({
     _id: id,
     ...(doctorId ? { doctor: doctorId } : {}),
-  }).select('status startedAt completedAt date time');
+  }).select(
+    'status startedAt completedAt date time leaveConflict clinicHoursConflict scheduleChangeRequestId',
+  );
   if (!appt) return { error: 'Appointment not found' };
+
+  if (
+    (next === 'confirmed' || next === 'in-progress') &&
+    (appt.leaveConflict ||
+      appt.clinicHoursConflict ||
+      appt.scheduleChangeRequestId)
+  ) {
+    return {
+      error: 'Resolve the schedule conflict before confirming or starting this appointment.',
+    };
+  }
 
   if (!TRANSITIONS[next].includes(appt.status)) {
     return { error: `Cannot move a ${appt.status} appointment to ${next}` };
