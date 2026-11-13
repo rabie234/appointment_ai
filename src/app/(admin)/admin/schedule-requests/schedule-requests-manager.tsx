@@ -3,6 +3,7 @@
 import { useState } from "react"
 import { useRouter } from "next/navigation"
 import type { DayHours } from "@/lib/schedule"
+import { formatTime12h } from "@/lib/time-format"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent } from "@/components/ui/card"
@@ -63,7 +64,7 @@ function ScheduleColumn({
                               )
                                   .map(
                                       (interval) =>
-                                          `${interval.open}–${interval.close}`
+                                          `${formatTime12h(interval.open, language)}–${formatTime12h(interval.close, language)}`
                                   )
                                   .join(" · ")}
                     </span>
@@ -264,9 +265,7 @@ export function ScheduleRequestsManager({
                                                                 )}
                                                                 {" · "}
                                                                 <span dir="ltr">
-                                                                    {
-                                                                        conflict.time
-                                                                    }
+                                                                    {formatTime12h(conflict.time, language)}
                                                                 </span>
                                                             </p>
                                                         </div>

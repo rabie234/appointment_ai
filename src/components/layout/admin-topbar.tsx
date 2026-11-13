@@ -7,6 +7,7 @@ import { useRouter } from "next/navigation"
 import { Input } from "@/components/ui/input"
 import { useLanguage } from "@/components/i18n/language-provider"
 import { t } from "@/components/i18n/translations"
+import { formatTime12h } from "@/lib/time-format"
 import { NotificationsBell } from "./notifications-bell"
 import { LanguageSwitcher } from "@/components/i18n/language-switcher"
 import { LogoutButton } from "./logout-button"
@@ -229,7 +230,9 @@ export function AdminTopbar({
                                                         "appointment" && (
                                                         <p className="mt-1 text-xs text-muted-foreground">
                                                             {result.date} ·{" "}
-                                                            {result.time}
+                                                            {result.time
+                                                                ? formatTime12h(result.time, language)
+                                                                : ""}
                                                             {result.status
                                                                 ? ` · ${result.status}`
                                                                 : ""}

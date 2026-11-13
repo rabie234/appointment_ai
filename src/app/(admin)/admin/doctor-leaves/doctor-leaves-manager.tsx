@@ -2,6 +2,7 @@
 
 import { useLanguage } from "@/components/i18n/language-provider"
 import { t } from "@/components/i18n/translations"
+import { formatTime12h } from "@/lib/time-format"
 import { useMemo, useState } from "react"
 import { useRouter } from "next/navigation"
 import { Input } from "@/components/ui/input"
@@ -542,7 +543,7 @@ export function DoctorLeavesManager({
                                                         {appointment.date}
                                                     </td>
                                                     <td className="p-3">
-                                                        {appointment.time}
+                                                        {formatTime12h(appointment.time, language)}
                                                     </td>
                                                     <td className="p-3">
                                                         {t(

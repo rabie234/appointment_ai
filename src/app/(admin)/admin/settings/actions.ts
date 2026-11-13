@@ -10,6 +10,7 @@ import Doctor from '@/models/Doctor';
 import {
   validateWeek,
   weekFromFormData,
+  intervalsForDay,
   dayOfWeek,
   slotsForDay,
 } from '@/lib/schedule';
@@ -40,15 +41,17 @@ export async function updateClinicHours(
     const previousClinicHours = await ClinicHours.findOne({ key: 'clinic' })
       .select('hours')
       .lean();
+    const daySignature = (entry: (typeof week)[number]) =>
+      JSON.stringify({
+        closed: entry.closed,
+        intervals: entry.closed
+          ? []
+          : intervalsForDay(entry).map(({ open, close }) => [open, close]),
+      });
     const comparableHours = (hours: typeof week) =>
       [...hours]
         .sort((a, b) => a.day.localeCompare(b.day))
-        .map(({ day, open, close, closed }) => [
-          day,
-          closed,
-          closed ? '' : open,
-          closed ? '' : close,
-        ]);
+        .map((entry) => [entry.day, daySignature(entry)]);
     const clinicHoursChanged =
       !previousClinicHours ||
       JSON.stringify(comparableHours(previousClinicHours.hours)) !==
@@ -60,13 +63,7 @@ export async function updateClinicHours(
     const changedDays = week
       .filter((entry) => {
         const previous = previousByDay.get(entry.day);
-        return (
-          !previous ||
-          Boolean(previous.closed) !== entry.closed ||
-          (!entry.closed &&
-            !previous.closed &&
-            (previous.open !== entry.open || previous.close !== entry.close))
-        );
+        return !previous || daySignature(previous) !== daySignature(entry);
       })
       .map((entry) => entry.day);
 

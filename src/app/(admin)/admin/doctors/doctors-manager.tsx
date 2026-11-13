@@ -3,6 +3,7 @@
 
 import { useActionState, useEffect, useRef, useState } from "react"
 import { useFormStatus } from "react-dom"
+import { useRouter } from "next/navigation"
 import {
     Table,
     TableBody,
@@ -28,7 +29,8 @@ import {
     KeyRound,
 } from "lucide-react"
 import { WeekEditor } from "@/components/schedule/week-editor"
-import { DAYS, type DayHours } from "@/lib/schedule"
+import { DAYS, intervalsForDay, type DayHours } from "@/lib/schedule"
+import { formatTime12h } from "@/lib/time-format"
 import {
     createDoctor,
     updateDoctor,
@@ -377,6 +379,7 @@ function ScheduleDialog({
     onClose: () => void
 }) {
     const { language } = useLanguage()
+    const router = useRouter()
 
     const [state, formAction] = useActionState<DoctorFormState, FormData>(
         updateDoctorSchedule,
@@ -384,8 +387,11 @@ function ScheduleDialog({
     )
 
     useEffect(() => {
-        if (state.success) onClose()
-    }, [state.success, onClose])
+        if (state.success) {
+            router.refresh()
+            onClose()
+        }
+    }, [state.success, onClose, router])
 
     return (
         <Overlay onClose={onClose}>
@@ -965,7 +971,13 @@ function clinicHoursSummary(
             return `${t(language, day).slice(0, 3)} ${t(language, "closed")}`
         }
 
-        return `${t(language, day).slice(0, 3)} ${hoursForDay.open}–${hoursForDay.close}`
+        const intervals = intervalsForDay(hoursForDay)
+        return `${t(language, day).slice(0, 3)} ${intervals
+            .map(
+                (interval) =>
+                    `${formatTime12h(interval.open, language)}–${formatTime12h(interval.close, language)}`
+            )
+            .join(" · ")}`
     })
 
     return parts.join(" · ")

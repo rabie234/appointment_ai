@@ -188,7 +188,8 @@ export function WeekEditor({
                 <button
                   type="button"
                   onClick={() => addInterval(entry.day)}
-                  className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md border text-muted-foreground hover:bg-muted hover:text-foreground"
+                  disabled={intervals.length >= 8}
+                  className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md border text-muted-foreground hover:bg-muted hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40"
                   aria-label={`${addRangeLabel}: ${t(language, entry.day)}`}
                   title={addRangeLabel}
                 >

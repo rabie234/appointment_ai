@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { cn } from "@/lib/utils"
 import { useLanguage } from "@/components/i18n/language-provider"
+import { formatTime12h } from "@/lib/time-format"
 import { t } from "@/components/i18n/translations"
 import {
     Calendar as CalendarIcon,
@@ -309,7 +310,7 @@ if (!result.success) {
                                         {state.existingAppointment.doctorName} ·{" "}
                                         {state.existingAppointment.specialty} ·{" "}
                                         {state.existingAppointment.date} ·{" "}
-                                        {state.existingAppointment.time}
+                                        {formatTime12h(state.existingAppointment.time, language)}
                                     </p>
                                 )}
                             </div>

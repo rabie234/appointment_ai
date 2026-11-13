@@ -10,6 +10,7 @@ import {
 import ReactMarkdown from "react-markdown";
 import { useLanguage, type Language } from "@/components/i18n/language-provider";
 import { t } from "@/components/i18n/translations";
+import { formatTime12h, formatTimesInText } from "@/lib/time-format";
 import {
   BrainCircuit,
   FileUp,
@@ -616,7 +617,9 @@ export default function AdminAITrainingPage() {
                   </div>
 
                   <div className="prose-chat text-sm leading-relaxed">
-                    <ReactMarkdown>{testResult.text}</ReactMarkdown>
+                    <ReactMarkdown>
+                      {formatTimesInText(testResult.text, language)}
+                    </ReactMarkdown>
                   </div>
 
                   {testResult.suggestion && (
@@ -627,7 +630,7 @@ export default function AdminAITrainingPage() {
                       <p>
                         {testResult.suggestion.doctorName} ·{" "}
                         {testResult.suggestion.date} ·{" "}
-                        {testResult.suggestion.time}
+                        {formatTime12h(testResult.suggestion.time, language)}
                       </p>
                       <p className="mt-1 text-xs text-muted-foreground">
                         {tr("No appointment was created.")}

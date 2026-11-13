@@ -23,6 +23,7 @@ import {
 import { cn } from "@/lib/utils";
 import { useLanguage } from "@/components/i18n/language-provider";
 import { t } from "@/components/i18n/translations";
+import { formatTime12h, formatTimesInText } from "@/lib/time-format";
 import type {
   BookingSuggestion,
   BookingConfirmation,
@@ -89,18 +90,6 @@ const PROMPTS = [
     labelAr: "ألم في الرأس",
   },
 ];
-
-function to12h(time: string, language: Language): string {
-  const [h, m] = time.split(":").map(Number);
-  if (Number.isNaN(h) || Number.isNaN(m)) return time;
-  const date = new Date(Date.UTC(2026, 0, 1, h, m));
-  return new Intl.DateTimeFormat(language === "ar" ? "ar-LB" : "en-US", {
-    hour: "numeric",
-    minute: "2-digit",
-    hour12: true,
-    timeZone: "UTC",
-  }).format(date);
-}
 
 function prettyDate(date: string, language: Language): string {
   const d = new Date(`${date}T00:00:00`);
@@ -598,7 +587,9 @@ function Bubble({
       >
         {message.content ? (
           <div className="prose-chat text-sm leading-relaxed">
-            <ReactMarkdown>{message.content}</ReactMarkdown>
+            <ReactMarkdown>
+              {formatTimesInText(message.content, language)}
+            </ReactMarkdown>
           </div>
         ) : message.streaming ? (
           <span className="inline-flex gap-1 py-1">
@@ -663,7 +654,7 @@ function SuggestionCard({
       <p className="text-xs text-primary font-medium">{s.specialty}</p>
       <div className="flex items-center gap-2 text-xs text-muted-foreground">
         <CalendarCheck className="h-3.5 w-3.5 text-primary" />
-        {prettyDate(s.date, language)} · {to12h(s.time, language)}
+        {prettyDate(s.date, language)} · {formatTime12h(s.time, language)}
       </div>
       <div className="flex flex-col sm:flex-row gap-2 mt-1">
         <Button
@@ -702,7 +693,7 @@ function BookedCard({
       <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-muted-foreground">
         <span className="flex items-center gap-1.5">
           <CalendarCheck className="h-3.5 w-3.5 text-emerald-600" />{" "}
-          {prettyDate(c.date, language)} · {to12h(c.time, language)}
+          {prettyDate(c.date, language)} · {formatTime12h(c.time, language)}
         </span>
         <span className="flex items-center gap-1.5">
           {c.type === "video" ? (
@@ -749,7 +740,7 @@ function CancellationCard({
       <p className="text-xs text-primary font-medium">{s.specialty}</p>
       <div className="flex items-center gap-2 text-xs text-muted-foreground">
         <CalendarCheck className="h-3.5 w-3.5" />
-        {prettyDate(s.date, language)} · {to12h(s.time, language)}
+        {prettyDate(s.date, language)} · {formatTime12h(s.time, language)}
       </div>
       <div className="flex items-center gap-2 text-xs text-muted-foreground">
         {s.type === "video" ? (

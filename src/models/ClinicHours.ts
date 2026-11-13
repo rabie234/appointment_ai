@@ -21,6 +21,18 @@ const DayHoursSchema = new Schema<DayHours>(
     open: { type: String, default: '09:00' },
     close: { type: String, default: '17:00' },
     closed: { type: Boolean, default: false },
+    intervals: {
+      type: [
+        new Schema(
+          {
+            open: { type: String, required: true },
+            close: { type: String, required: true },
+          },
+          { _id: false }
+        ),
+      ],
+      default: undefined,
+    },
   },
   { _id: false }
 );

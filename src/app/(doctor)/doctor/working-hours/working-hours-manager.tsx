@@ -8,7 +8,13 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { useLanguage } from "@/components/i18n/language-provider"
 import { t } from "@/components/i18n/translations"
 import { WeekEditor } from "@/components/schedule/week-editor"
-import { toMinutes, type Day, type DayHours } from "@/lib/schedule"
+import {
+    intervalsForDay,
+    toMinutes,
+    type Day,
+    type DayHours,
+} from "@/lib/schedule"
+import { formatTime12h } from "@/lib/time-format"
 import {
     acknowledgeClinicHours,
     requestMyScheduleChange,
@@ -22,6 +28,20 @@ export type ScheduleChangeRequestView = {
     status: "pending" | "approved" | "rejected" | "cancelled"
     adminNote: string
     requestedAt: string
+}
+
+function formatDayHours(day: DayHours, language: "ar" | "en") {
+    if (day.closed) return t(language, "Off")
+
+    const intervals = intervalsForDay(day)
+    return intervals.length > 0
+        ? intervals
+              .map(
+                  (interval) =>
+                      `${formatTime12h(interval.open, language)}–${formatTime12h(interval.close, language)}`
+              )
+              .join(" · ")
+        : t(language, "Off")
 }
 
 function SubmitButton({
@@ -113,25 +133,38 @@ export function WorkingHoursManager({
                           doctorDay.closed !== clinicDay.closed ||
                           (!doctorDay.closed &&
                               !clinicDay.closed &&
-                              (doctorDay.open !== clinicDay.open ||
-                                  doctorDay.close !== clinicDay.close))
+                              JSON.stringify(intervalsForDay(doctorDay)) !==
+                                  JSON.stringify(intervalsForDay(clinicDay)))
                       )
                   })
                   .map((day) => day.day)
     )
-    const conflictAt = (day: DayHours) => {
+    const conflictingIntervalIndexes = (day: DayHours) => {
         const clinicDay = clinicByDay.get(day.day)
-        if (day.closed) return { open: false, close: false }
-        if (!clinicDay || clinicDay.closed) return { open: true, close: true }
-        return {
-            open: toMinutes(day.open) < toMinutes(clinicDay.open),
-            close: toMinutes(day.close) > toMinutes(clinicDay.close),
-        }
+        if (day.closed) return new Set<number>()
+
+        const doctorIntervals = intervalsForDay(day)
+        const clinicIntervals =
+            clinicDay && !clinicDay.closed ? intervalsForDay(clinicDay) : []
+
+        if (doctorIntervals.length === 0) return new Set([0])
+
+        return new Set(
+            doctorIntervals.flatMap((doctorInterval, index) => {
+                const fits = clinicIntervals.some(
+                    (clinicInterval) =>
+                        toMinutes(doctorInterval.open) >=
+                            toMinutes(clinicInterval.open) &&
+                        toMinutes(doctorInterval.close) <=
+                            toMinutes(clinicInterval.close)
+                )
+                return fits ? [] : [index]
+            })
+        )
     }
-    const hasClinicHoursConflict = currentSchedule.some((day) => {
-        const conflict = conflictAt(day)
-        return conflict.open || conflict.close
-    })
+    const hasClinicHoursConflict = currentSchedule.some(
+        (day) => conflictingIntervalIndexes(day).size > 0
+    )
     const needsClinicHoursReview =
         clinicHoursVersion !== acknowledgedClinicHoursVersion
     const showSavedScheduleOnly =
@@ -173,7 +206,9 @@ export function WorkingHoursManager({
                                     {currentSchedule.map((day) => (
                                         <tr key={day.day} className="border-b last:border-0">
                                             <th scope="row" className="px-3 py-3 text-start font-medium">{t(language, day.day)}</th>
-                                            <td className="px-3 py-3 tabular-nums">{day.closed ? t(language, "Off") : day.open + "–" + day.close}</td>
+                                            <td className="px-3 py-3 tabular-nums">
+                                                {formatDayHours(day, language)}
+                                            </td>
                                         </tr>
                                     ))}
                                 </tbody>
@@ -187,23 +222,23 @@ export function WorkingHoursManager({
                         <CardHeader><CardTitle className="text-xl">{t(language, "Saved doctor working hours")}</CardTitle></CardHeader>
                         <CardContent className="space-y-2">
                             {currentSchedule.map((day) => {
-                                const conflict = conflictAt(day)
-                                const clinicDay = clinicByDay.get(day.day)
-                                const changedOpen = needsClinicHoursReview && clinicDay && !day.closed && !clinicDay.closed && day.open !== clinicDay.open
-                                const changedClose = needsClinicHoursReview && clinicDay && !day.closed && !clinicDay.closed && day.close !== clinicDay.close
-                                const changedClosedStatus = needsClinicHoursReview && clinicDay && day.closed !== clinicDay.closed
+                                const conflicts = conflictingIntervalIndexes(day)
+                                const intervals = intervalsForDay(day)
                                 return (
                                     <div key={day.day} className="flex justify-between gap-3 text-sm">
                                         <span>{t(language, day.day)}</span>
                                         <span className="tabular-nums">
-                                            {day.closed ? (
-                                                <>{t(language, "Off")}{changedClosedStatus && <span aria-hidden="true" className="ms-1 text-xs font-bold text-red-600">*</span>}</>
-                                            ) : (
-                                                <>
-                                                    {day.open}{((hasClinicHoursConflict && conflict.open) || changedOpen) && <span aria-hidden="true" className="ms-1 text-xs font-bold text-red-600">*</span>}
-                                                    –{day.close}{((hasClinicHoursConflict && conflict.close) || changedClose) && <span aria-hidden="true" className="ms-1 text-xs font-bold text-red-600">*</span>}
-                                                </>
-                                            )}
+                                            {intervals.length === 0
+                                                ? t(language, "Off")
+                                                : intervals.map((interval, index) => (
+                                                      <span key={`${day.day}-${index}`}>
+                                                          {index > 0 && <span className="mx-1.5 text-muted-foreground">·</span>}
+                                                          {formatTime12h(interval.open, language)}–{formatTime12h(interval.close, language)}
+                                                          {conflicts.has(index) && (
+                                                              <span aria-hidden="true" className="ms-1 text-xs font-bold text-red-600">*</span>
+                                                          )}
+                                                      </span>
+                                                  ))}
                                         </span>
                                     </div>
                                 )
@@ -233,7 +268,7 @@ export function WorkingHoursManager({
                                                 <>{t(language, "Off")}</>
                                             ) : (
                                                 <>
-                                                    {day.open}–{day.close}
+                                                    {formatDayHours(day, language)}
                                                 </>
                                             )}
                                         </span>
@@ -328,9 +363,7 @@ export function WorkingHoursManager({
                                     {request.requestedSchedule.map((day) => (
                                         <p key={day.day}>
                                             {t(language, day.day)}:{" "}
-                                            {day.closed
-                                                ? t(language, "Off")
-                                                : `${day.open}–${day.close}`}
+                                            {formatDayHours(day, language)}
                                         </p>
                                     ))}
                                 </div>

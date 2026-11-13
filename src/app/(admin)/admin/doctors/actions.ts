@@ -8,6 +8,7 @@ import { getClinicHours } from '@/lib/clinic-hours';
 import { genai, GEMINI_MODEL } from '@/lib/gemini';
 import {
   DAYS,
+  normalizeWeek,
   slotsForDay,
   validateAgainstClinic,
   validateWeek,
@@ -15,6 +16,7 @@ import {
 } from '@/lib/schedule';
 import { isPastClinicSlot } from '@/lib/slots-server';
 import Doctor from '@/models/Doctor';
+import ClinicHours from '@/models/ClinicHours';
 import User from '@/models/User';
 import Specialty from '@/models/Specialty';
 import { notifyAppointmentParties } from '@/lib/notification-service';
@@ -74,6 +76,14 @@ export async function createDoctor(
   let userId: string | undefined;
 
   try {
+    const clinicHours = await ClinicHours.findOne({ key: 'clinic' })
+      .select('hours createdAt version')
+      .lean();
+    const schedule = normalizeWeek(clinicHours?.hours);
+    const clinicHoursVersion = clinicHours
+      ? `${new Date(clinicHours.createdAt).toISOString()}:${clinicHours.version ?? 0}`
+      : 'default';
+
     if (password) {
       const user = await User.create({
         name,
@@ -93,6 +103,8 @@ export async function createDoctor(
       email,
       phone: phone || undefined,
       experience: experience || undefined,
+      schedule,
+      clinicHoursAcknowledgedVersion: clinicHoursVersion,
       status: status === 'inactive' ? 'inactive' : 'active',
       availability: availability === 'on-leave' ? 'on-leave' : 'available',
     });
@@ -347,11 +359,32 @@ export async function updateDoctorSchedule(
   }
 
   try {
-    await Doctor.findByIdAndUpdate(
+    const updatedDoctor = await Doctor.findByIdAndUpdate(
       id,
       { schedule: week },
       { new: true, runValidators: true }
     );
+    if (!updatedDoctor) return { error: 'Doctor not found' };
+
+    // Do not report success if a stale Mongoose model/schema dropped the new
+    // interval array. This makes the Save result reflect what was persisted.
+    const requestedSchedule = normalizeWeek(week);
+    const savedSchedule = normalizeWeek(updatedDoctor.schedule);
+    const allRangesPersisted = requestedSchedule.every((day, index) => {
+      const savedDay = savedSchedule[index];
+      return (
+        day.closed === savedDay.closed &&
+        JSON.stringify(day.intervals ?? []) ===
+          JSON.stringify(savedDay.intervals ?? [])
+      );
+    });
+
+    if (!allRangesPersisted) {
+      return {
+        error:
+          'The schedule could not save all time ranges. Restart the app and try again.',
+      };
+    }
   } catch (error) {
     console.error('Update doctor schedule failed:', error);
     return { error: 'Could not save schedule. Please try again.' };

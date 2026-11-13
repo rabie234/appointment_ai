@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation"
 import { Bell, CheckCheck } from "lucide-react"
 import { useLanguage } from "@/components/i18n/language-provider"
 import { t } from "@/components/i18n/translations"
+import { formatTimesInText } from "@/lib/time-format"
 import {
     getMyNotifications,
     markAllNotificationsRead,
@@ -106,6 +107,7 @@ export function NotificationsBell() {
             day: "numeric",
             hour: "numeric",
             minute: "2-digit",
+            hour12: true,
         }
     )
 
@@ -179,7 +181,7 @@ export function NotificationsBell() {
                                             </span>
                                             {item.context && (
                                                 <span className="mt-1 block text-xs text-muted-foreground">
-                                                    {item.context}
+                                                    {formatTimesInText(item.context, language)}
                                                 </span>
                                             )}
                                             <span className="mt-2 block text-[11px] text-muted-foreground">
