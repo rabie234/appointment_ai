@@ -5,6 +5,7 @@ import { getClinicHours } from "@/lib/clinic-hours"
 import { normalizeWeek, slotEnd } from "@/lib/schedule"
 import Appointment from "@/models/Appointment"
 import Doctor from "@/models/Doctor"
+import DoctorLeave from "@/models/DoctorLeave"
 import User from "@/models/User"
 import Specialty from "@/models/Specialty"
 import {
@@ -89,6 +90,14 @@ export default async function AdminAppointmentsPage({
         getClinicHours(),
     ])
 
+    const leaveDocs = await DoctorLeave.find({
+        doctor: { $in: doctorDocs.map((doctor) => doctor._id) },
+        endDate: { $gt: new Date() },
+        $or: [{ status: "approved" }, { status: { $exists: false } }],
+    })
+        .select("doctor startDate endDate")
+        .lean()
+
     const patients: PatientOption[] = patientDocs.map((p) => ({
         id: String(p._id),
         name: p.name,
@@ -115,6 +124,12 @@ export default async function AdminAppointmentsPage({
                 specialtyAr:
                     specialtyDoc?.nameAr?.trim() || specialtyName,
                 schedule: normalizeWeek(doctor.schedule),
+                leavePeriods: leaveDocs
+                    .filter((leave) => String(leave.doctor) === String(doctor._id))
+                    .map((leave) => ({
+                        start: new Date(leave.startDate).toISOString().slice(0, 10),
+                        end: new Date(leave.endDate).toISOString().slice(0, 10),
+                    })),
             }
         })
     )

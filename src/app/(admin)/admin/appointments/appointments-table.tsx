@@ -60,6 +60,7 @@ export type DoctorOption = {
     specialty: string
     specialtyAr: string
     schedule: DayHours[]
+    leavePeriods: { start: string; end: string }[]
 }
 
 export type AdminAppointment = {
@@ -537,6 +538,10 @@ function CreateDialog({
     const availableDays = days.filter((day) => {
         const dateValue = new Date(`${day.value}T00:00:00.000Z`)
         const weekday = DAYS[(dateValue.getUTCDay() + 6) % 7]
+        const doctorOnLeave = selectedDoctor?.leavePeriods.some(
+            (period) => day.value >= period.start && day.value < period.end,
+        )
+        if (doctorOnLeave) return false
         const scheduleDay = scheduleForDates.find(
             (entry) => entry.day === weekday,
         )
