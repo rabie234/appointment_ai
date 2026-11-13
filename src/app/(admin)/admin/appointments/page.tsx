@@ -1,7 +1,8 @@
 
 import connectDB from "@/lib/mongodb"
 import { requireRole } from "@/lib/session"
-import { slotEnd } from "@/lib/schedule"
+import { getClinicHours } from "@/lib/clinic-hours"
+import { normalizeWeek, slotEnd } from "@/lib/schedule"
 import Appointment from "@/models/Appointment"
 import Doctor from "@/models/Doctor"
 import User from "@/models/User"
@@ -63,7 +64,7 @@ export default async function AdminAppointmentsPage({
     await requireRole("admin")
     await connectDB()
 
-    const [docs, patientDocs, doctorDocs] = await Promise.all([
+    const [docs, patientDocs, doctorDocs, clinicHours] = await Promise.all([
         Appointment.find()
             .populate<{ patient: PopulatedName }>(
                 "patient",
@@ -82,9 +83,10 @@ export default async function AdminAppointmentsPage({
             .lean(),
 
         Doctor.find({ status: "active" })
-            .select("name nameAr specialty")
+            .select("name nameAr specialty schedule")
             .sort({ name: 1 })
             .lean(),
+        getClinicHours(),
     ])
 
     const patients: PatientOption[] = patientDocs.map((p) => ({
@@ -112,6 +114,7 @@ export default async function AdminAppointmentsPage({
                 specialty: specialtyName,
                 specialtyAr:
                     specialtyDoc?.nameAr?.trim() || specialtyName,
+                schedule: normalizeWeek(doctor.schedule),
             }
         })
     )
@@ -143,11 +146,6 @@ export default async function AdminAppointmentsPage({
                 time: to12h(appointment.time),
                 endTime: to12h(slotEnd(appointment.time)),
                 status: appointment.status,
-                needsScheduleReview: Boolean(
-                    appointment.clinicHoursConflict ||
-                        appointment.leaveConflict ||
-                        appointment.scheduleChangeRequestId
-                ),
                 type: appointment.type,
                 price: `$${appointment.price.toFixed(2)}`,
                 startedAt: stampTime(appointment.startedAt),
@@ -160,6 +158,7 @@ export default async function AdminAppointmentsPage({
         appointments={appointments}
         patients={patients}
         doctors={doctors}
+        clinicHours={clinicHours}
         initialSelectedAppointmentId={appointmentId}
         initialStatus={status}
     />

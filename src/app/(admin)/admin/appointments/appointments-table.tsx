@@ -7,6 +7,13 @@ import { useState, useTransition, useActionState, useEffect } from "react"
 import { useFormStatus } from "react-dom"
 import { cn } from "@/lib/utils"
 import {
+    DAYS,
+    intersectSchedules,
+    normalizeWeek,
+    slotsForDay,
+    type DayHours,
+} from "@/lib/schedule"
+import {
     Table,
     TableBody,
     TableCell,
@@ -52,6 +59,7 @@ export type DoctorOption = {
     nameAr: string
     specialty: string
     specialtyAr: string
+    schedule: DayHours[]
 }
 
 export type AdminAppointment = {
@@ -72,7 +80,6 @@ export type AdminAppointment = {
         | "completed"
         | "cancelled"
         | "missed"
-    needsScheduleReview: boolean
     type: "video" | "in-person"
     price: string
     startedAt?: string
@@ -132,6 +139,7 @@ type AppointmentsTableProps = {
     appointments: AdminAppointment[]
     patients: PatientOption[]
     doctors: DoctorOption[]
+    clinicHours: DayHours[]
     initialSelectedAppointmentId?: string
     initialStatus?: string
 }
@@ -140,6 +148,7 @@ export function AppointmentsTable({
     appointments,
     patients,
     doctors,
+    clinicHours,
     initialSelectedAppointmentId,
     initialStatus,
 }: AppointmentsTableProps) {
@@ -415,11 +424,6 @@ export function AppointmentsTable({
                                         <Badge variant={badgeVariant(app.status)}>
                                             {t(language, STATUS_LABEL[app.status])}
                                         </Badge>
-                                        {app.needsScheduleReview && (
-                                            <p className="mt-1 text-xs font-medium text-amber-700">
-                                                {t(language, "Schedule conflict — review required")}
-                                            </p>
-                                        )}
                                     </TableCell>
 
                                     {/* Quick actions */}
@@ -439,6 +443,7 @@ export function AppointmentsTable({
                 <CreateDialog
                     patients={patients}
                     doctors={doctors}
+                    clinicHours={clinicHours}
                     onClose={() => setCreateOpen(false)}
                 />
             )}
@@ -502,10 +507,12 @@ function pretty(time: string, language: Language): string {
 function CreateDialog({
     patients,
     doctors,
+    clinicHours,
     onClose,
 }: {
     patients: PatientOption[]
     doctors: DoctorOption[]
+    clinicHours: DayHours[]
     onClose: () => void
 }) {
     const { language } = useLanguage()
@@ -520,6 +527,29 @@ function CreateDialog({
     const [slots, setSlots] = useState<string[]>([])
     const [loadingSlots, startLoadingSlots] = useTransition()
 
+    const selectedDoctor = doctors.find((doctor) => doctor.id === doctorId)
+    const scheduleForDates = selectedDoctor
+        ? intersectSchedules(
+              normalizeWeek(selectedDoctor.schedule),
+              clinicHours,
+          )
+        : clinicHours
+    const availableDays = days.filter((day) => {
+        const dateValue = new Date(`${day.value}T00:00:00.000Z`)
+        const weekday = DAYS[(dateValue.getUTCDay() + 6) % 7]
+        const scheduleDay = scheduleForDates.find(
+            (entry) => entry.day === weekday,
+        )
+
+        return Boolean(
+            scheduleDay &&
+                !scheduleDay.closed &&
+                slotsForDay(scheduleDay).length > 0,
+        )
+    })
+    const hasSelectedDate = availableDays.some((day) => day.value === date)
+    const firstAvailableDate = availableDays[0]?.value ?? ""
+
     const [state, formAction] = useActionState<
         AppointmentActionState,
         FormData
@@ -527,7 +557,10 @@ function CreateDialog({
 
     // Load available slots when the selected doctor or date changes.
     useEffect(() => {
-        if (!doctorId) return
+        if (!doctorId || !date) {
+            setSlots([])
+            return
+        }
 
         let cancelled = false
 
@@ -543,6 +576,14 @@ function CreateDialog({
             cancelled = true
         }
     }, [doctorId, date])
+
+    useEffect(() => {
+        if (!hasSelectedDate) {
+            setTime("")
+            setSlots([])
+            setDate(firstAvailableDate)
+        }
+    }, [hasSelectedDate, firstAvailableDate])
 
     useEffect(() => {
         if (state.success) {
@@ -661,7 +702,11 @@ function CreateDialog({
                                 onChange={(event) => pickDate(event.target.value)}
                                 className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                             >
-                                {days.map((day) => (
+                                {availableDays.length === 0 ? (
+                                    <option value="">
+                                        {t(language, "No working days available.")}
+                                    </option>
+                                ) : availableDays.map((day) => (
                                     <option key={day.value} value={day.value}>
                                         {day.label}
                                     </option>
@@ -784,12 +829,10 @@ function RowActions({ app }: { app: AdminAppointment }) {
     const [showCancelForm, setShowCancelForm] = useState(false)
     const [cancellationReason, setCancellationReason] = useState("")
 
-    const canConfirm =
-        app.status === "pending" && !app.needsScheduleReview
+    const canConfirm = app.status === "pending"
 
     const canStart =
-        !app.needsScheduleReview &&
-        (app.status === "pending" || app.status === "confirmed")
+        app.status === "pending" || app.status === "confirmed"
 
     const canComplete = app.status === "in-progress"
 
