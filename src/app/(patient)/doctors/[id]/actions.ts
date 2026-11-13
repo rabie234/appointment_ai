@@ -23,6 +23,7 @@ import {
 } from "@/lib/booking-policy"
 import { notifyAdmins, notifyUser } from "@/lib/notification-service"
 import { getClinicHours } from "@/lib/clinic-hours";
+import { isPastClinicSlot } from "@/lib/slots-server";
 /** The UTC start and exclusive end of a day. */
 function dayBounds(date: Date): { start: Date; end: Date } {
   const start = new Date(date)
@@ -113,12 +114,6 @@ export async function getAvailableSlots(
     if (!mongoose.Types.ObjectId.isValid(appointmentId)) {
       return { slots: [], error: "Invalid appointment" }
     }
-const clinicSchedule = await getClinicHours();
-
-schedule = intersectSchedules(
-  schedule,
-  clinicSchedule
-);
     const appointment = await Appointment.findOne({
       _id: appointmentId,
       patient: session.user.id,
@@ -155,9 +150,17 @@ schedule = intersectSchedules(
     }
   }
 
+  // Patient availability always respects both the doctor's saved schedule
+  // and the current clinic hours. The saved doctor schedule is never changed.
+  schedule = intersectSchedules(schedule, await getClinicHours())
+
   const taken = await bookedTimes(doctorId, date)
 
-  return { slots: availableSlots(schedule, date, taken) }
+  return {
+    slots: availableSlots(schedule, date, taken).filter(
+      (time) => !isPastClinicSlot(dateStr, time),
+    ),
+  }
 }
 /** Returns only dates covered by approved leave or older status-less records. */
 export async function getDoctorLeaveDates(
@@ -239,6 +242,10 @@ export async function bookAppointment(
   if (!date) return { error: "Invalid date" }
   if (!isValidTime(time)) return { error: "Invalid time" }
 
+  if (isPastClinicSlot(dateStr, time)) {
+    return { error: "That time has already passed. Please choose another slot." }
+  }
+
   const today = new Date()
   today.setUTCHours(0, 0, 0, 0)
 
@@ -294,6 +301,12 @@ const entry = effectiveSchedule.find((item) => item.day === day);
   }
 
   const taken = await bookedTimes(doctorId, date)
+
+  // Recheck immediately before writing in case the selected slot passed while
+  // the availability and database checks were running.
+  if (isPastClinicSlot(dateStr, time)) {
+    return { error: "That time has already passed. Please choose another slot." }
+  }
 
   if (taken.has(time)) {
     return {

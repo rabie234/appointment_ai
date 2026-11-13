@@ -17,6 +17,7 @@ import {
     intersectSchedules,
 } from "@/lib/schedule"
 import { getClinicHours } from "@/lib/clinic-hours";
+import { isPastClinicSlot } from "@/lib/slots-server";
 export async function cancelPatientAppointment(appointmentId: string) {
     try {
         const session = await requireRole("patient")
@@ -218,6 +219,13 @@ export async function rescheduleLeaveConflictAppointment(
 
         if (!isValidTime(time)) {
             return { success: false, message: "Invalid time" }
+        }
+
+        if (isPastClinicSlot(dateStr, time)) {
+            return {
+                success: false,
+                message: "That time has already passed. Please choose another slot.",
+            }
         }
 
         const today = new Date()

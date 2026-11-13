@@ -5,6 +5,26 @@ import Appointment from '@/models/Appointment';
 import DoctorLeave from "@/models/DoctorLeave"
 import { getClinicHours } from '@/lib/clinic-hours';
 import { intersectSchedules } from '@/lib/schedule';
+
+export const CLINIC_TIME_ZONE = 'Asia/Beirut';
+
+/** Compare a clinic-local calendar date and time with the current instant. */
+export function isPastClinicSlot(date: string, time: string, now = new Date()): boolean {
+  const parts = new Intl.DateTimeFormat('en-CA', {
+    timeZone: CLINIC_TIME_ZONE,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    hourCycle: 'h23',
+  }).formatToParts(now);
+  const values = Object.fromEntries(parts.map(({ type, value }) => [type, value]));
+  const today = `${values.year}-${values.month}-${values.day}`;
+  const currentTime = `${values.hour}:${values.minute}`;
+
+  return date < today || (date === today && time <= currentTime);
+}
 /**
  * Server-side slot helpers shared by the patient booking flow, the admin
  * appointment creator, and the AI assistant tools — so the "what's free?" logic
@@ -84,6 +104,8 @@ const effectiveSchedule = intersectSchedules(
 const taken = await bookedTimes(doctorId, date);
 
 return {
-  slots: availableSlots(effectiveSchedule, date, taken),
+  slots: availableSlots(effectiveSchedule, date, taken).filter(
+    (time) => !isPastClinicSlot(dateStr, time),
+  ),
 };
 }

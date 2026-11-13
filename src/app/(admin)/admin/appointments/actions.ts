@@ -9,12 +9,14 @@ import {
   isValidTime,
   normalizeWeek,
   slotsForDay,
+  intersectSchedules,
 } from "@/lib/schedule"
 import Appointment from "@/models/Appointment"
 import Doctor from "@/models/Doctor"
 import DoctorLeave from "@/models/DoctorLeave"
 import { parseCalendarDate as parseDay } from "@/lib/date-validation"
 import { notifyAppointmentParties } from "@/lib/notification-service"
+import { getClinicHours } from "@/lib/clinic-hours"
 import {
   applyTransition,
   type NextStatus,
@@ -202,7 +204,10 @@ export async function getDoctorSlots(
     return { slots: [] }
   }
 
-  const schedule = normalizeWeek(doctor.schedule)
+  const schedule = intersectSchedules(
+    normalizeWeek(doctor.schedule),
+    await getClinicHours(),
+  )
   const taken = await bookedTimes(doctorId, date)
 
   return { slots: availableSlots(schedule, date, taken) }
@@ -260,7 +265,10 @@ export async function adminCreateAppointment(
     return { error: "The doctor is on leave on this date." }
   }
 
-  const schedule = normalizeWeek(doctor.schedule)
+  const schedule = intersectSchedules(
+    normalizeWeek(doctor.schedule),
+    await getClinicHours(),
+  )
   const entry = schedule.find((item) => item.day === dayOfWeek(date))
 
   if (!entry || entry.closed || !slotsForDay(entry).includes(time)) {

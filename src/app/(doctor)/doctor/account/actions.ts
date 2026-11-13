@@ -5,7 +5,7 @@ import connectDB from '@/lib/mongodb';
 import { requireDoctor } from '@/lib/doctor-session';
 import { getClinicHours } from '@/lib/clinic-hours';
 import ClinicHours from '@/models/ClinicHours';
-import { normalizeWeek, validateAgainstClinic, validateWeek, weekFromFormData } from '@/lib/schedule';
+import { validateAgainstClinic, validateWeek, weekFromFormData } from '@/lib/schedule';
 import User from '@/models/User';
 import DoctorScheduleRequest from "@/models/DoctorScheduleRequest"
 import { notifyAdmins } from "@/lib/notification-service"
@@ -136,9 +136,8 @@ export async function acknowledgeClinicHours(): Promise<void> {
     ? `${new Date(clinicHours.createdAt).toISOString()}:${clinicHours.version ?? 0}`
     : 'default';
 
-  // Reviewing this version applies the clinic's current weekly hours to the
-  // doctor's saved schedule. Any later personal changes still use approval.
-  doctor.schedule = normalizeWeek(clinicHours?.hours);
+  // Acknowledging clinic hours records that the doctor reviewed this version.
+  // The saved doctor schedule remains independent and is not overwritten.
   doctor.clinicHoursAcknowledgedVersion = version;
   await doctor.save();
   revalidatePath('/doctor/working-hours');

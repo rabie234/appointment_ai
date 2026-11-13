@@ -78,10 +78,12 @@ function StatCard({
 export default function DoctorProfileDisplay({
     doctor,
     workingDays,
+    openWeekdays,
     consultationFee,
 }: {
     doctor: DoctorData
     workingDays: WorkingDay[]
+    openWeekdays: string[]
     consultationFee: number
 }) {
     const { language } = useLanguage()
@@ -261,6 +263,7 @@ export default function DoctorProfileDisplay({
                         doctorId={doctor.id}
                         fee={consultationFee}
                         active={doctor.active}
+                        openWeekdays={openWeekdays}
                     />
                 </div>
             </div>

@@ -78,7 +78,7 @@ export async function updateClinicHours(
                   category: 'schedule',
                   titleKey: 'Notification: Clinic hours updated',
                   bodyKey:
-                    'Notification body: The clinic updated its working hours. Review and apply them on your Working Hours page.',
+                    'Notification body: The clinic updated its working hours. Review the change on your Working Hours page. Your saved schedule will not be changed; patient availability follows both schedules.',
                   href: '/doctor/working-hours',
                 }),
               ]

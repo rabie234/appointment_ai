@@ -4,7 +4,8 @@ import { isValidObjectId } from "mongoose"
 
 import connectDB from "@/lib/mongodb"
 import { requireRole } from "@/lib/session"
-import { normalizeWeek } from "@/lib/schedule"
+import { intersectSchedules, normalizeWeek } from "@/lib/schedule"
+import { getClinicHours } from "@/lib/clinic-hours"
 
 import Doctor from "@/models/Doctor"
 import Appointment from "@/models/Appointment"
@@ -88,8 +89,11 @@ export default async function DoctorProfilePage({
     console.log("TOTAL PATIENTS:", totalPatients)
     console.log("SUCCESS RATE:", successRate)
 
-    // Prepare doctor working schedule
-    const schedule = normalizeWeek(doctor.schedule)
+    // Show patients only the hours during which both the clinic and doctor are open.
+    const schedule = intersectSchedules(
+        normalizeWeek(doctor.schedule),
+        await getClinicHours(),
+    )
 
     const workingDays = schedule
         .filter((day) => !day.closed)
@@ -113,6 +117,7 @@ export default async function DoctorProfilePage({
                 active: doctor.status === "active",
             }}
             workingDays={workingDays}
+            openWeekdays={workingDays.map((day) => day.day)}
             consultationFee={CONSULTATION_FEE}
         />
     )

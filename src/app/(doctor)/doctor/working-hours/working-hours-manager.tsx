@@ -111,7 +111,7 @@ export function WorkingHoursManager({
     })
     const needsClinicHoursReview =
         clinicHoursVersion !== acknowledgedClinicHoursVersion
-    const clinicHoursApplied =
+    const showSavedScheduleOnly =
         !hasClinicHoursConflict && !needsClinicHoursReview
     const dateFormatter = new Intl.DateTimeFormat(
         language === "ar" ? "ar-LB" : "en-US",
@@ -132,7 +132,7 @@ export function WorkingHoursManager({
                 </p>
             </div>
 
-            {clinicHoursApplied ? (
+            {showSavedScheduleOnly ? (
                 <Card className="bg-card/60">
                     <CardHeader>
                         <CardTitle className="text-xl">{t(language, "Saved doctor working hours")}</CardTitle>
@@ -216,21 +216,23 @@ export function WorkingHoursManager({
                 </div>
 
             )}
-            {clinicHoursApplied && (
+            {showSavedScheduleOnly && (
                     <p className="rounded-md bg-emerald-50 px-4 py-3 text-sm text-emerald-800 dark:bg-emerald-900/20 dark:text-emerald-300">
-                        {t(language, "Current clinic hours were applied to your saved schedule. You can request changes below.")}
+                        {t(language, "Your saved schedule is unchanged. Patient availability follows the overlapping clinic and doctor hours.")}
                     </p>
                 )}
             {(needsClinicHoursReview || hasClinicHoursConflict) && (
                 <div className="space-y-3 rounded-md border border-amber-300 bg-amber-50 p-4 text-sm text-amber-950 dark:border-amber-900 dark:bg-amber-950/30 dark:text-amber-100">
                     <p>
                         {hasClinicHoursConflict
-                            ? t(language, "Your saved working hours extend beyond the current clinic hours. The red star marks the conflicting time. Continuing will replace your saved schedule with the current clinic hours. You can request changes afterward.")
-                            : t(language, "Red stars mark clinic hours that differ from your saved schedule. Reviewing applies the current clinic hours to your schedule.")}
+                            ? t(language, "Your saved schedule extends beyond the current clinic hours. Patient slots are limited to overlapping times. Reviewing does not change your saved schedule.")
+                            : t(language, "Clinic hours changed. Reviewing records that you saw the update; your saved schedule stays unchanged.")}
                     </p>
-                    <form action={acknowledgeClinicHours}>
-                        <SubmitButton>{t(language, "I Reviewed and Apply Clinic Hours")}</SubmitButton>
-                    </form>
+                    {needsClinicHoursReview && (
+                        <form action={acknowledgeClinicHours}>
+                            <SubmitButton>{t(language, "I Reviewed Clinic Hours")}</SubmitButton>
+                        </form>
+                    )}
                 </div>
             )}            <Card className="border-none bg-card/60 shadow-sm">
                 <CardHeader>

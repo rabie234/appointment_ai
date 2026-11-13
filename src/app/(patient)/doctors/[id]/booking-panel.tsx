@@ -22,13 +22,27 @@ import {
 } from "./actions"
 import { useRouter, useSearchParams } from "next/navigation"
 import { rescheduleLeaveConflictAppointment } from "../../appointments/actions"
-function upcomingDays(count: number, language: "en" | "ar") {
+function upcomingDays(count: number, language: "en" | "ar", openWeekdays: string[]) {
     const out: { value: string; label: string; weekday: string }[] = []
-    const today = new Date()
+    const todayParts = new Intl.DateTimeFormat("en-CA", {
+        timeZone: "Asia/Beirut",
+        year: "numeric",
+        month: "2-digit",
+        day: "2-digit",
+    }).formatToParts(new Date())
+    const todayValues = Object.fromEntries(
+        todayParts.map(({ type, value }) => [type, value]),
+    )
+    const today = `${todayValues.year}-${todayValues.month}-${todayValues.day}`
 
     for (let i = 0; i < count; i++) {
-        const d = new Date(today)
-        d.setDate(today.getDate() + i)
+        const d = new Date(`${today}T00:00:00.000Z`)
+        d.setUTCDate(d.getUTCDate() + i)
+        const weekdayKey = d.toLocaleDateString("en-US", {
+            weekday: "long",
+            timeZone: "UTC",
+        })
+        if (!openWeekdays.includes(weekdayKey)) continue
 
         out.push({
             value: d.toISOString().slice(0, 10),
@@ -65,14 +79,16 @@ export function BookingPanel({
     doctorId,
     fee,
     active,
+    openWeekdays,
 }: {
     doctorId: string
     fee: number
     active: boolean
+    openWeekdays: string[]
 }) {
     const { language } = useLanguage()
-    const days = upcomingDays(14, language)
-    const [selectedDate, setSelectedDate] = useState(days[0].value)
+    const days = upcomingDays(14, language, openWeekdays)
+    const [selectedDate, setSelectedDate] = useState(days[0]?.value ?? "")
     const [selectedTime, setSelectedTime] = useState<string | null>(null)
     const [type, setType] = useState<"in-person" | "video">("in-person")
     const [slots, setSlots] = useState<string[]>([])
@@ -85,7 +101,10 @@ const rescheduleAppointmentId = searchParams.get("rescheduleAppointmentId")
 const [rescheduling, setRescheduling] = useState(false)
 
     useEffect(() => {
-    if (!active) return
+    if (!active || !selectedDate) {
+        setSlots([])
+        return
+    }
 
     startLoadingSlots(async () => {
         const res = await getAvailableSlots(
@@ -189,6 +208,11 @@ if (!result.success) {
                             <p className="text-sm font-semibold mb-3 tracking-tight">
                                 {t(language, "Select Date")}
                             </p>
+                            {days.length === 0 ? (
+                                <p className="rounded-lg border px-3 py-6 text-center text-sm text-muted-foreground">
+                                    {t(language, "No appointment days are currently available.")}
+                                </p>
+                            ) : (
                             <div className="grid grid-cols-4 gap-2">
                                 {days.slice(0, 8).map((d) => (
                                     <button
@@ -209,6 +233,7 @@ if (!result.success) {
                                     </button>
                                 ))}
                             </div>
+                            )}
                         </div>
 
                         <div>

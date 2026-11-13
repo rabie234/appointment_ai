@@ -657,12 +657,14 @@ const translations = {
     "Saved doctor working hours": "ساعات عمل الطبيب المحفوظة",
     "Current clinic hours": "ساعات المركز الحالية",
     "Your saved working hours extend beyond the current clinic hours. The red star marks the conflicting time. Reviewing this update does not change your schedule.": "تمتد ساعات عملك المحفوظة إلى ما بعد ساعات المركز الحالية. تشير النجمة الحمراء إلى الوقت المتعارض. مراجعة هذا التحديث لا تغيّر جدولك.",
-    "I Reviewed and Apply Clinic Hours": "راجعت وأطبّق ساعات المركز الحالية",
-    "Your saved working hours extend beyond the current clinic hours. The red star marks the conflicting time. Continuing will replace your saved schedule with the current clinic hours. You can request changes afterward.": "تمتد ساعات عملك المحفوظة إلى ما بعد ساعات المركز الحالية. تشير النجمة الحمراء إلى الوقت المتعارض. عند المتابعة، سيُستبدل جدولك المحفوظ بساعات المركز الحالية. يمكنك طلب تغييره لاحقًا.",
-    "Current clinic hours were applied to your saved schedule. You can request changes below.": "تم تطبيق ساعات المركز الحالية على جدولك المحفوظ. يمكنك طلب تغييره أدناه.",
+    "I Reviewed Clinic Hours": "راجعت ساعات المركز",
+    "Your saved schedule extends beyond the current clinic hours. Patient slots are limited to overlapping times. Reviewing does not change your saved schedule.": "يتجاوز جدولك المحفوظ ساعات المركز الحالية. ستقتصر المواعيد المتاحة للمرضى على الأوقات المشتركة بين الجدولين. المراجعة لا تغيّر جدولك المحفوظ.",
+    "Clinic hours changed. Reviewing records that you saw the update; your saved schedule stays unchanged.": "تغيّرت ساعات المركز. تؤكد المراجعة أنك اطّلعت على التحديث، من دون تغيير جدولك المحفوظ.",
+    "Your saved schedule is unchanged. Patient availability follows the overlapping clinic and doctor hours.": "جدولك المحفوظ لم يتغيّر. المواعيد المتاحة للمرضى تتبع الأوقات المشتركة بين دوام المركز وجدولك.",
+    "No appointment days are currently available.": "لا توجد أيام متاحة لحجز المواعيد حاليًا.",
     "Day": "اليوم",
         "Notification: Clinic hours updated": "تم تحديث ساعات المركز",
-    "Notification body: The clinic updated its working hours. Review and apply them on your Working Hours page.": "حدّث المركز ساعات العمل. راجعها وطبّقها من صفحة ساعات العمل.",
+    "Notification body: The clinic updated its working hours. Review the change on your Working Hours page. Your saved schedule will not be changed; patient availability follows both schedules.": "حدّث المركز ساعات العمل. راجع التغيير من صفحة ساعات العمل. لن يتغيّر جدولك المحفوظ، وستتبع المواعيد المتاحة للمريض جدولي المركز والطبيب.",
 } as const;
 
 export function t(language: Language, text: string): string {
