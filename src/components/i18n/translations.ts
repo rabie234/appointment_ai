@@ -674,7 +674,10 @@ const translations = {
 "Notification body: A patient selected a new time for an affected appointment. Please review and confirm the new time.": "اختار المريض وقتًا جديدًا لموعد متأثر. يُرجى مراجعة الموعد الجديد وتأكيده.",
 "Notification body: A patient selected a new time for an affected appointment. The appointment is pending confirmation.": "اختار المريض وقتًا جديدًا لموعد متأثر. الموعد بانتظار التأكيد.",
 "Resolve the schedule conflict before confirming or starting this appointment.": "عالج تعارض الجدول قبل تأكيد هذا الموعد أو بدء الزيارة.",
-        "Notification body: The clinic updated its working hours. Review the change on your Working Hours page. Your saved schedule will not be changed; patient availability follows both schedules.": "حدّث المركز ساعات العمل. راجع التغيير من صفحة ساعات العمل. لن يتغيّر جدولك المحفوظ، وستتبع المواعيد المتاحة للمريض جدولي المركز والطبيب.",
+ "Your Working Hours": "ساعات عملك",
+"Clinic Working Hours": "ساعات عمل العيادة",     
+"Some saved doctor hours fall outside clinic hours. Patient booking is limited to the overlapping times. Reviewing saves only the overlapping hours and never expands your schedule.": "بعض ساعات عملك المحفوظة تقع خارج ساعات المركز. حجز المرضى يقتصر على الأوقات المشتركة بين الجدولين. عند مراجعة التحديث تُحفظ الأوقات المشتركة فقط ولا يتوسع جدولك.",
+"Notification body: The clinic updated its working hours. Review the change on your Working Hours page. Your saved schedule will not be changed; patient availability follows both schedules.": "حدّث المركز ساعات العمل. راجع التغيير من صفحة ساعات العمل. لن يتغيّر جدولك المحفوظ، وستتبع المواعيد المتاحة للمريض جدولي المركز والطبيب.",
 } as const;
 
 export function t(language: Language, text: string): string {

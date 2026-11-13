@@ -1,10 +1,16 @@
 import mongoose, { Schema, Document, Model } from "mongoose";
-import { type DayHours, defaultWeek } from "@/lib/schedule";
+import {
+  DAYS,
+  type Day,
+  type DayHours,
+  defaultWeek,
+} from "@/lib/schedule";
 
 export interface IClinicHours extends Document {
   key: string;
   hours: DayHours[];
   version: number;
+  lastChangedDays: Day[];
   createdAt: Date;
   updatedAt: Date;
 }
@@ -23,8 +29,6 @@ const DayHoursSchema = new Schema<DayHours>(
     open: { type: String, default: "09:00" },
     close: { type: String, default: "17:00" },
     closed: { type: Boolean, default: false },
-
-    // Undefined by default so older records can still use open/close.
     intervals: {
       type: [TimeIntervalSchema],
       default: undefined,
@@ -47,6 +51,10 @@ const ClinicHoursSchema = new Schema<IClinicHours>(
     version: {
       type: Number,
       default: 0,
+    },
+    lastChangedDays: {
+      type: [{ type: String, enum: DAYS }],
+      default: [],
     },
   },
   { timestamps: true }

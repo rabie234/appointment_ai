@@ -13,7 +13,10 @@ import {
 import User from "@/models/User";
 import DoctorScheduleRequest from "@/models/DoctorScheduleRequest";
 import { notifyAdmins } from "@/lib/notification-service";
-
+import {
+  intersectSchedules,
+  normalizeWeek,
+} from "@/lib/schedule";
 export type AccountFormState = {
   error?: string;
   success?: string;
@@ -150,6 +153,7 @@ export async function requestMyScheduleChange(
  * Records that the doctor reviewed this clinic-hours version.
  * It deliberately does not replace or extend the doctor's saved schedule.
  */
+/** Apply clinic limits to the doctor's schedule when they review the change. */
 export async function acknowledgeClinicHours(): Promise<void> {
   const { doctor } = await requireDoctor();
   if (!doctor) return;
@@ -164,10 +168,19 @@ export async function acknowledgeClinicHours(): Promise<void> {
     ? `${new Date(clinicHours.createdAt).toISOString()}:${clinicHours.version ?? 0}`
     : "default";
 
+  const doctorSchedule = normalizeWeek(doctor.schedule);
+  const clinicSchedule = normalizeWeek(clinicHours?.hours);
+
+  doctor.schedule = intersectSchedules(doctorSchedule, clinicSchedule);
   doctor.clinicHoursAcknowledgedVersion = version;
+
   await doctor.save();
 
   revalidatePath("/doctor/working-hours");
+  revalidatePath("/admin/doctors");
+  revalidatePath("/appointments");
+  revalidatePath("/admin/appointments");
+  revalidatePath("/doctor/appointments");
 }
 
 export async function changeMyPassword(

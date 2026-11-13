@@ -13,6 +13,7 @@ import {
   slotsForDay,
   validateWeek,
   weekFromFormData,
+  type DayHours,
 } from "@/lib/schedule";
 import {
   notifyAdmins,
@@ -25,20 +26,13 @@ export type ClinicHoursState = {
   success?: boolean;
 };
 
-function comparableHours(hours: unknown) {
-  return normalizeWeek(hours).map((entry) => [
-    entry.day,
-    entry.closed,
-    ...(entry.intervals ?? []).map(
-      (interval) => `${interval.open}-${interval.close}`
-    ),
+function daySignature(day: DayHours): string {
+  return JSON.stringify([
+    day.closed,
+    day.closed ? [] : day.intervals ?? [{ open: day.open, close: day.close }],
   ]);
 }
 
-/**
- * Saves clinic opening hours, notifies doctors, and flags future appointments
- * that no longer fit within both the doctor's schedule and clinic hours.
- */
 export async function updateClinicHours(
   _prev: ClinicHoursState,
   formData: FormData
@@ -55,29 +49,43 @@ export async function updateClinicHours(
   await connectDB();
 
   try {
-    const previousClinicHours = await ClinicHours.findOne({ key: "clinic" })
+    const previousClinic = await ClinicHours.findOne({ key: "clinic" })
       .select("hours")
       .lean();
 
-    const clinicHoursChanged =
-      !previousClinicHours ||
-      JSON.stringify(comparableHours(previousClinicHours.hours)) !==
-        JSON.stringify(comparableHours(week));
+    const previousWeek = normalizeWeek(previousClinic?.hours);
+    const previousByDay = new Map(
+      previousWeek.map((day) => [day.day, day])
+    );
+
+    const changedDays = week
+      .filter((day) => {
+        const previousDay = previousByDay.get(day.day);
+        return !previousDay ||
+          daySignature(previousDay) !== daySignature(day);
+      })
+      .map((day) => day.day);
+
+    const clinicHoursChanged = changedDays.length > 0;
 
     await ClinicHours.findOneAndUpdate(
       { key: "clinic" },
       {
-        $set: { key: "clinic", hours: week },
+        $set: {
+          key: "clinic",
+          hours: week,
+          ...(clinicHoursChanged ? { lastChangedDays: changedDays } : {}),
+        },
         ...(clinicHoursChanged ? { $inc: { version: 1 } } : {}),
       },
       { upsert: true, new: true, setDefaultsOnInsert: true }
     );
 
-    // A clinic-closed weekday becomes a doctor's day off.
-    // Reopening the clinic later does not reopen the doctor's schedule.
+    // Closed clinic days become doctor Off days. Keep their saved intervals
+    // so they can be restored if the doctor is later marked available.
     const closedDays = week
-      .filter((entry) => entry.closed)
-      .map((entry) => entry.day);
+      .filter((day) => day.closed)
+      .map((day) => day.day);
 
     await Promise.all(
       closedDays.map((day) =>
@@ -86,7 +94,6 @@ export async function updateClinicHours(
           {
             $set: {
               "schedule.$[closedDay].closed": true,
-              "schedule.$[closedDay].intervals": [],
             },
           },
           { arrayFilters: [{ "closedDay.day": day }] }
@@ -109,7 +116,7 @@ export async function updateClinicHours(
                   category: "schedule",
                   titleKey: "Notification: Clinic hours updated",
                   bodyKey:
-                    "Notification body: The clinic changed its working hours. Patient availability follows the overlap between your saved schedule and the clinic hours. Review the update on your Working Hours page.",
+                    "Notification body: The clinic updated its working hours. Review the marked days on your Working Hours page.",
                   href: "/doctor/working-hours",
                 }),
               ]
@@ -128,7 +135,7 @@ export async function updateClinicHours(
       .select("_id doctor date time clinicHoursConflict")
       .lean();
 
-    const clinicByDay = new Map(week.map((entry) => [entry.day, entry]));
+    const clinicByDay = new Map(week.map((day) => [day.day, day]));
 
     const doctorIds = [
       ...new Set(
@@ -151,14 +158,9 @@ export async function updateClinicHours(
       appointments.map(async (appointment) => {
         const day = dayOfWeek(new Date(appointment.date));
         const clinicDay = clinicByDay.get(day);
-        const doctorSchedule = doctorById.get(
-          String(appointment.doctor)
-        );
-        const doctorDay = doctorSchedule?.find(
-          (entry) => entry.day === day
-        );
+        const doctorSchedule = doctorById.get(String(appointment.doctor));
+        const doctorDay = doctorSchedule?.find((item) => item.day === day);
 
-        // Do not guess if the appointment's doctor or schedule is missing.
         if (!clinicDay || !doctorDay) return;
 
         const effectiveDay = intersectSchedules(
@@ -171,7 +173,7 @@ export async function updateClinicHours(
           slotsForDay(effectiveDay).includes(appointment.time);
 
         if (appointmentIsAvailable) {
-          if (appointment.clinicHoursConflict === true) {
+          if (appointment.clinicHoursConflict) {
             await Appointment.updateOne(
               { _id: appointment._id, clinicHoursConflict: true },
               { $set: { clinicHoursConflict: false } }
@@ -180,9 +182,9 @@ export async function updateClinicHours(
           return;
         }
 
-        if (appointment.clinicHoursConflict === true) return;
+        if (appointment.clinicHoursConflict) return;
 
-        const result = await Appointment.updateOne(
+        const updated = await Appointment.updateOne(
           {
             _id: appointment._id,
             clinicHoursConflict: { $ne: true },
@@ -190,7 +192,7 @@ export async function updateClinicHours(
           { $set: { clinicHoursConflict: true } }
         );
 
-        if (result.modifiedCount === 0) return;
+        if (updated.modifiedCount === 0) return;
 
         await notifyAppointmentParties(
           String(appointment._id),

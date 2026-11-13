@@ -50,32 +50,6 @@ function SubmitButton({
   );
 }
 
-function ScheduleFeedback({
-  state,
-  language,
-}: {
-  state: AccountFormState;
-  language: "ar" | "en";
-}) {
-  if (state.error) {
-    return (
-      <p className="rounded-md bg-destructive/10 px-3 py-2 text-sm text-destructive">
-        {t(language, state.error)}
-      </p>
-    );
-  }
-
-  if (state.success) {
-    return (
-      <p className="rounded-md bg-emerald-50 px-3 py-2 text-sm text-emerald-700 dark:bg-emerald-900/20 dark:text-emerald-400">
-        {t(language, state.success)}
-      </p>
-    );
-  }
-
-  return null;
-}
-
 function dayIntervals(day: DayHours): TimeInterval[] {
   if (day.closed) return [];
   if (Array.isArray(day.intervals)) return day.intervals;
@@ -115,17 +89,20 @@ function ScheduleCard({
   schedule,
   language,
   limitedDays,
+  changedDays,
 }: {
   title: string;
   schedule: DayHours[];
   language: "ar" | "en";
   limitedDays?: Set<string>;
+  changedDays?: Set<string>;
 }) {
   return (
-    <Card className="bg-card/60">
+    <Card className="min-w-0 bg-card/60">
       <CardHeader>
         <CardTitle className="text-xl">{t(language, title)}</CardTitle>
       </CardHeader>
+
       <CardContent>
         <div className="overflow-x-auto">
           <table className="w-full min-w-[360px] border-collapse text-sm">
@@ -144,9 +121,11 @@ function ScheduleCard({
                 )}
               </tr>
             </thead>
+
             <tbody>
               {schedule.map((day) => {
                 const isLimited = limitedDays?.has(day.day) ?? false;
+                const changed = changedDays?.has(day.day) ?? false;
 
                 return (
                   <tr key={day.day} className="border-b last:border-0">
@@ -155,10 +134,29 @@ function ScheduleCard({
                       className="px-3 py-3 text-start font-medium"
                     >
                       {t(language, day.day)}
+                      {changed && (
+                        <span
+                          className="ms-1 font-bold text-red-600"
+                          title={
+                            language === "ar"
+                              ? "تغيّرت ساعات العيادة في هذا اليوم"
+                              : "Clinic hours changed on this day"
+                          }
+                          aria-label={
+                            language === "ar"
+                              ? "تغيّرت ساعات العيادة"
+                              : "Clinic hours changed"
+                          }
+                        >
+                          *
+                        </span>
+                      )}
                     </th>
+
                     <td className="px-3 py-3 tabular-nums" dir="ltr">
                       {formatDayHours(day, language)}
                     </td>
+
                     {limitedDays && (
                       <td className="px-3 py-3">
                         {isLimited ? (
@@ -184,17 +182,20 @@ function ScheduleCard({
 export function WorkingHoursManager({
   currentSchedule,
   clinicSchedule,
+  clinicChangedDays,
   clinicHoursVersion,
   acknowledgedClinicHoursVersion,
   requests,
 }: {
   currentSchedule: DayHours[];
   clinicSchedule: DayHours[];
+  clinicChangedDays: string[];
   clinicHoursVersion: string;
   acknowledgedClinicHoursVersion: string;
   requests: ScheduleChangeRequestView[];
 }) {
   const { language } = useLanguage();
+
   const hasPendingRequest = requests.some(
     (request) => request.status === "pending"
   );
@@ -204,16 +205,21 @@ export function WorkingHoursManager({
     {}
   );
 
-  const effectiveSchedule = intersectSchedules(currentSchedule, clinicSchedule);
+  const effectiveSchedule = intersectSchedules(
+    currentSchedule,
+    clinicSchedule
+  );
+
   const effectiveByDay = new Map(
     effectiveSchedule.map((day) => [day.day, day])
   );
-  const limitedDays = new Set(
+
+  const actualLimitedDays = new Set(
     currentSchedule
       .filter((day) => !sameDayHours(day, effectiveByDay.get(day.day)))
       .map((day) => day.day)
   );
-  const hasClinicHoursConflict = limitedDays.size > 0;
+
   const needsClinicHoursReview =
     clinicHoursVersion !== acknowledgedClinicHoursVersion;
 
@@ -221,6 +227,15 @@ export function WorkingHoursManager({
     language === "ar" ? "ar-LB" : "en-US",
     { year: "numeric", month: "short", day: "numeric" }
   );
+
+  const reviewMessage =
+    actualLimitedDays.size > 0
+      ? language === "ar"
+        ? "تغيّرت ساعات العيادة وأصبحت بعض ساعات جدولك محدودة. عند المراجعة تُحفظ الأوقات المشتركة فقط، ولا يتم توسيع جدولك."
+        : "Clinic hours changed and now limit some of your saved hours. Reviewing saves only the overlapping hours and never expands your schedule."
+      : language === "ar"
+        ? "تغيّرت ساعات العيادة. راجع الأيام المعلّمة. تمديد ساعات العيادة لا يوسّع جدولك المحفوظ."
+        : "Clinic hours changed. Review the marked days. Longer clinic hours do not expand your saved schedule.";
 
   return (
     <div
@@ -236,62 +251,49 @@ export function WorkingHoursManager({
         </p>
       </div>
 
-      <div className="grid gap-4 xl:grid-cols-3">
-        <ScheduleCard
-          title="Saved doctor working hours"
-          schedule={currentSchedule}
-          language={language}
-          limitedDays={limitedDays}
-        />
-        <ScheduleCard
-          title="Patient bookable hours"
-          schedule={effectiveSchedule}
-          language={language}
-        />
-        <ScheduleCard
-          title="Current clinic hours"
-          schedule={clinicSchedule}
-          language={language}
-        />
-      </div>
-
-      {hasClinicHoursConflict ? (
-        <div className="space-y-3 rounded-md border border-amber-300 bg-amber-50 p-4 text-sm text-amber-950 dark:border-amber-900 dark:bg-amber-950/30 dark:text-amber-100">
-          <p>
-            {t(
-              language,
-              "Some saved doctor hours fall outside clinic hours. Patient booking is limited to the overlapping times. Reviewing clinic hours does not expand your saved schedule."
-            )}
-          </p>
-          {needsClinicHoursReview && (
+      {needsClinicHoursReview ? (
+        <>
+          <div className="space-y-3 rounded-md border border-amber-300 bg-amber-50 p-4 text-sm text-amber-950 dark:border-amber-900 dark:bg-amber-950/30 dark:text-amber-100">
+            <p>{reviewMessage}</p>
+            <p className="text-xs">
+              <span className="me-1 font-bold text-red-600">*</span>
+              {language === "ar"
+                ? "يوم تغيّرت فيه ساعات العيادة"
+                : "Clinic hours changed on this day"}
+            </p>
             <form action={acknowledgeClinicHours}>
               <SubmitButton>
                 {t(language, "I Reviewed Clinic Hours")}
               </SubmitButton>
             </form>
-          )}
-        </div>
-      ) : needsClinicHoursReview ? (
-        <div className="space-y-3 rounded-md border border-amber-300 bg-amber-50 p-4 text-sm text-amber-950 dark:border-amber-900 dark:bg-amber-950/30 dark:text-amber-100">
-          <p>
-            {t(
-              language,
-              "Clinic hours changed. Your saved doctor hours remain unchanged. Review the update."
-            )}
-          </p>
-          <form action={acknowledgeClinicHours}>
-            <SubmitButton>
-              {t(language, "I Reviewed Clinic Hours")}
-            </SubmitButton>
-          </form>
-        </div>
+          </div>
+
+          <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+            <ScheduleCard
+              title="Your Working Hours"
+              schedule={currentSchedule}
+              language={language}
+              limitedDays={
+                actualLimitedDays.size > 0 ? actualLimitedDays : undefined
+              }
+            />
+
+            <ScheduleCard
+              title="Clinic Working Hours"
+              schedule={clinicSchedule}
+              language={language}
+              changedDays={new Set(clinicChangedDays)}
+            />
+          </div>
+        </>
       ) : (
-        <p className="rounded-md bg-emerald-50 px-4 py-3 text-sm text-emerald-800 dark:bg-emerald-900/20 dark:text-emerald-300">
-          {t(
-            language,
-            "Patient slots follow the overlapping clinic and doctor hours."
-          )}
-        </p>
+        <div className="max-w-3xl">
+          <ScheduleCard
+            title="Clinic Working Hours"
+            schedule={clinicSchedule}
+            language={language}
+          />
+        </div>
       )}
 
       <Card className="border-none bg-card/60 shadow-sm">
@@ -300,6 +302,7 @@ export function WorkingHoursManager({
             {t(language, "Request a schedule change")}
           </CardTitle>
         </CardHeader>
+
         <CardContent>
           {hasPendingRequest && (
             <p className="mb-4 rounded-md bg-amber-50 px-3 py-2 text-sm text-amber-800 dark:bg-amber-900/20 dark:text-amber-300">
@@ -315,7 +318,17 @@ export function WorkingHoursManager({
                 closedLabel={t(language, "Off")}
               />
 
-              <ScheduleFeedback state={state} language={language} />
+              {state.error && (
+                <p className="rounded-md bg-destructive/10 px-3 py-2 text-sm text-destructive">
+                  {t(language, state.error)}
+                </p>
+              )}
+
+              {state.success && (
+                <p className="rounded-md bg-emerald-50 px-3 py-2 text-sm text-emerald-700 dark:bg-emerald-900/20 dark:text-emerald-400">
+                  {t(language, state.success)}
+                </p>
+              )}
 
               <div className="flex justify-end">
                 <SubmitButton disabled={hasPendingRequest}>
