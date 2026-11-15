@@ -214,8 +214,10 @@ async function findDoctors(
     filter.specialty = new RegExp(`^${escapeRegExp(specialty)}$`, "i");
   if (name) filter.name = new RegExp(escapeRegExp(name), "i");
 
+  // Leave is date-specific and stored separately; the profile availability
+  // flag can be stale, so only get_available_slots determines live availability.
   const docs = await Doctor.find(filter)
-    .select("name specialty rating experience availability")
+    .select("name specialty rating experience")
     .sort({ rating: -1 })
     .limit(20)
     .lean();
@@ -231,7 +233,6 @@ async function findDoctors(
       specialty: d.specialty,
       rating: d.rating ?? 0,
       experience: d.experience ?? "",
-      availability: d.availability,
     })),
     ...(activeAppointmentInRequestedSpecialty
       ? { activeAppointmentInRequestedSpecialty }

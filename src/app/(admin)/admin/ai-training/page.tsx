@@ -13,6 +13,7 @@ import { t } from "@/components/i18n/translations";
 import { formatTime12h, formatTimesInText } from "@/lib/time-format";
 import {
   BrainCircuit,
+  ChevronDown,
   FileUp,
   Plus,
   Search,
@@ -62,6 +63,29 @@ type UploadPreview = {
   source: string;
   entries: KnowledgeContent[];
 };
+
+type SandboxTest = TrainingData["tests"][number];
+
+function groupSandboxTests(tests: SandboxTest[]) {
+  const groups = new Map<string, SandboxTest[]>();
+
+  for (const test of tests) {
+    const normalizedQuestion = test.question
+      .normalize("NFKC")
+      .trim()
+      .replace(/\s+/g, " ")
+      .toLowerCase();
+    const key = normalizedQuestion || test.id;
+    const attempts = groups.get(key) ?? [];
+    attempts.push(test);
+    groups.set(key, attempts);
+  }
+
+  return Array.from(groups.values()).map((attempts) => ({
+    question: attempts[0].question,
+    attempts,
+  }));
+}
 
 function hasDraft(entry: TrainingEntry) {
   return (
@@ -125,7 +149,8 @@ const AI_TRAINING_AR: Record<string, string> = {
   "Entry deleted. Its audit history has been retained.":
     "تم حذف العنصر مع الاحتفاظ بسجل التدقيق الخاص به.",
   "Expected phrase found": "تم العثور على العبارة المتوقعة",
-  "Expected phrase missing": "لم يتم العثور على العبارة المتوقعة",
+  "Expected phrase not found": "لم يتم العثور على العبارة المتوقعة",
+  "Expected phrase not set": "لم يتم تحديد عبارة متوقعة",
   "Expected phrases use a case-insensitive text match.":
     "تتم مطابقة العبارات المتوقعة دون التمييز بين الأحرف الكبيرة والصغيرة.",
   "Filter knowledge status": "تصفية حالة المعرفة",
@@ -139,10 +164,7 @@ const AI_TRAINING_AR: Record<string, string> = {
   "No clinic knowledge was retrieved for this question.":
     "لم يتم استرجاع معلومات من معرفة المركز لهذا السؤال.",
   "No data yet": "لا توجد بيانات بعد",
-  "No graded tests yet": "لا توجد اختبارات مُقيّمة بعد",
   "Patient chat · last 30 days": "محادثة المرضى · آخر 30 يومًا",
-  "Phrase found": "تم العثور على العبارة",
-  "Phrase missing": "العبارة غير موجودة",
   "Preview extracted content before importing it as drafts. Up to 5 MB per file.":
     "راجعي المحتوى المستخرج قبل استيراده كمسودات. الحد الأقصى 5 ميغابايت لكل ملف.",
   "Publish draft": "نشر المسودة",
@@ -154,6 +176,17 @@ const AI_TRAINING_AR: Record<string, string> = {
   "Question / intent": "السؤال / الغرض",
   "Question or section title": "السؤال أو عنوان القسم",
   "Recent assistant tests": "اختبارات المساعد الأخيرة",
+  "Trainer History": "سجل التدريب",
+  "Latest 15 test runs · repeated questions are grouped.":
+    "آخر 15 محاولة اختبار · جُمعت الأسئلة المتكررة معًا.",
+  "Expected phrase:": "العبارة المتوقعة:",
+  "Expected phrase unavailable for this older test.":
+    "العبارة المتوقعة غير متاحة لهذا الاختبار القديم.",
+  "No expected phrase was set for this test.": "لم يتم تحديد عبارة متوقعة لهذا الاختبار.",
+  attempts: "محاولات",
+  "Show all questions": "عرض كل الأسئلة",
+  "Show fewer questions": "عرض أسئلة أقل",
+  "Question unavailable": "السؤال غير متاح",
   Refresh: "تحديث",
   "Refresh library": "تحديث المكتبة",
   "Remove this entry from the library and patient chat?":
@@ -180,8 +213,6 @@ const AI_TRAINING_AR: Record<string, string> = {
   "Test saved drafts or published knowledge. Doctor availability is live; booking suggestions are previews and cannot create appointments.":
     "اختبري المسودات المحفوظة أو المعرفة المنشورة. توافر الأطباء مباشر؛ واقتراحات الحجز للمعاينة فقط ولا تنشئ مواعيد.",
   "Testing assistant…": "جارٍ اختبار المساعد…",
-  Ungraded: "غير مُقيّم",
-  "Ungraded test": "اختبار غير مُقيّم",
   "Upload clinic knowledge": "رفع معلومات المركز",
   "Upload clinic knowledge document": "رفع مستند معلومات المركز",
   "Version history": "سجل الإصدارات",
@@ -224,6 +255,7 @@ export default function AdminAITrainingPage() {
     "draft",
   );
   const [testing, setTesting] = useState(false);
+  const [showAllTests, setShowAllTests] = useState(false);
   const [testError, setTestError] = useState("");
   const [testResult, setTestResult] = useState<TestResult | null>(null);
   const editorRef = useRef<HTMLDivElement>(null);
@@ -430,6 +462,10 @@ export default function AdminAITrainingPage() {
     }) ?? [];
 
   const metrics = data?.metrics;
+  const testGroups = groupSandboxTests(data?.tests ?? []);
+  const visibleTestGroups = showAllTests
+    ? testGroups
+    : testGroups.slice(0, 5);
 
   return (
     <div className="space-y-8" dir={language === "ar" ? "rtl" : "ltr"}>
@@ -609,10 +645,10 @@ export default function AdminAITrainingPage() {
                       }
                     >
                       {testResult.passed === null
-                        ? tr("Ungraded test")
+                        ? tr("Expected phrase not set")
                         : testResult.passed
                           ? tr("Expected phrase found")
-                          : tr("Expected phrase missing")}
+                          : tr("Expected phrase not found")}
                     </Badge>
                   </div>
 
@@ -1317,24 +1353,19 @@ export default function AdminAITrainingPage() {
                 value={metrics ? String(metrics.misses) : "—"}
               />
 
-              <div className="border-t border-white/20 pt-4">
-                <Metric
-                  label={tr("Sandbox phrase checks")}
-                  value={
-                    metrics?.tests
-                      ? `${metrics.passed} / ${metrics.tests} ${tr("passed")}`
-                      : tr("No graded tests yet")
-                  }
-                />
-              </div>
             </CardContent>
           </Card>
 
           <Card className="border-none bg-card/60 shadow-sm">
-            <CardHeader>
+            <CardHeader className="pb-3">
               <CardTitle className="text-lg">
-                {tr("Recent assistant tests")}
+                {tr("Trainer History")}
               </CardTitle>
+              <p className="text-xs text-muted-foreground">
+                {tr(
+                  "Latest 15 test runs · repeated questions are grouped.",
+                )}
+              </p>
             </CardHeader>
 
             <CardContent className="space-y-4">
@@ -1344,44 +1375,121 @@ export default function AdminAITrainingPage() {
                 </p>
               )}
 
-              {data?.tests.map((test) => (
-                <div
-                  key={test.id}
-                  className="space-y-1 border-b pb-3 last:border-0 last:pb-0"
-                >
-                  <p className="line-clamp-2 text-sm font-medium">
-                    {test.question}
-                  </p>
+              <div id="trainer-test-groups" className="space-y-3">
+                {visibleTestGroups.map((group) => {
+                  const latest = group.attempts[0];
+                  const status = !latest.success
+                    ? tr("Request failed")
+                    : latest.passed === undefined
+                      ? tr("Expected phrase not set")
+                      : latest.passed
+                        ? tr("Expected phrase found")
+                        : tr("Expected phrase not found");
 
-                  <div className="flex flex-wrap items-center gap-2">
-                    <Badge
-                      variant={
-                        !test.success || test.passed === false
-                          ? "destructive"
-                          : test.passed
-                            ? "success"
-                            : "secondary"
-                      }
+                  return (
+                    <details
+                      key={latest.id}
+                      className="group rounded-lg border bg-background px-3 py-2"
                     >
-                      {!test.success
-                        ? tr("Request failed")
-                        : test.passed === undefined
-                          ? tr("Ungraded")
-                          : test.passed
-                            ? tr("Phrase found")
-                            : tr("Phrase missing")}
-                    </Badge>
+                      <summary className="flex cursor-pointer list-none flex-wrap items-center justify-between gap-2">
+                        <span className="line-clamp-2 min-w-0 flex-1 text-sm font-medium">
+                          {group.question || tr("Question unavailable")}
+                        </span>
+                        <span className="flex shrink-0 flex-wrap items-center gap-2">
+                          {group.attempts.length > 1 && (
+                            <Badge variant="outline">
+                              {group.attempts.length} {tr("attempts")}
+                            </Badge>
+                          )}
+                          <Badge
+                            variant={
+                              !latest.success || latest.passed === false
+                                ? "destructive"
+                                : latest.passed
+                                  ? "success"
+                                  : "secondary"
+                            }
+                          >
+                            {status}
+                          </Badge>
+                        </span>
+                        <ChevronDown
+                          aria-hidden="true"
+                          className="h-4 w-4 shrink-0 text-muted-foreground transition-transform group-open:rotate-180"
+                        />
+                      </summary>
 
-                    <span className="text-xs text-muted-foreground">
-                      {(test.durationMs / 1000).toFixed(1)}s
-                    </span>
-                  </div>
+                      <div className="mt-3 space-y-3 border-t pt-3">
+                        {group.attempts.map((test) => (
+                          <div key={test.id} className="space-y-1 text-xs">
+                            <div className="flex flex-wrap items-center justify-between gap-2">
+                              <span className="text-muted-foreground">
+                                {dateLabel(test.at, language)}
+                              </span>
+                              <span className="font-medium">
+                                {(test.durationMs / 1000).toFixed(1)}s
+                              </span>
+                            </div>
+                            <Badge
+                              variant={
+                                !test.success || test.passed === false
+                                  ? "destructive"
+                                  : test.passed
+                                    ? "success"
+                                    : "secondary"
+                              }
+                            >
+                              {!test.success
+                                ? tr("Request failed")
+                                : test.passed === undefined
+                                  ? tr("Expected phrase not set")
+                                  : test.passed
+                                    ? tr("Expected phrase found")
+                                    : tr("Expected phrase not found")}
+                            </Badge>
+                            {test.expectedPhrase ? (
+                              <p className="break-words text-muted-foreground">
+                                {tr("Expected phrase:")} {test.expectedPhrase}
+                              </p>
+                            ) : test.passed !== undefined ? (
+                              <p className="text-muted-foreground">
+                                {tr(
+                                  "Expected phrase unavailable for this older test.",
+                                )}
+                              </p>
+                            ) : (
+                              <p className="text-muted-foreground">
+                                {tr(
+                                  "No expected phrase was set for this test.",
+                                )}
+                              </p>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                    </details>
+                  );
+                })}
+              </div>
 
-                  <p className="text-xs text-muted-foreground">
-                    {dateLabel(test.at, language)}
-                  </p>
-                </div>
-              ))}
+              {testGroups.length > 5 && (
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  aria-expanded={showAllTests}
+                  aria-controls="trainer-test-groups"
+                  onClick={() => setShowAllTests((shown) => !shown)}
+                  className="w-full"
+                >
+                  {tr(
+                    showAllTests
+                      ? "Show fewer questions"
+                      : "Show all questions",
+                  )}
+                  {!showAllTests && ` (${testGroups.length})`}
+                </Button>
+              )}
             </CardContent>
           </Card>
 

@@ -53,6 +53,7 @@ export type TrainingData = {
   tests: {
     id: string;
     question: string;
+    expectedPhrase?: string;
     success: boolean;
     passed?: boolean;
     durationMs: number;
@@ -171,6 +172,7 @@ export async function getTrainingData(): Promise<Result<TrainingData>> {
         tests: tests.map((test) => ({
           id: String(test._id),
           question: test.question ?? "",
+          expectedPhrase: test.expectedPhrase,
           success: test.success,
           passed: test.passed,
           durationMs: test.durationMs,
@@ -518,6 +520,7 @@ export async function testAssistant(
         mode: "test",
         actor: actorName(session.user),
         question: message.trim(),
+        ...(expected.trim() ? { expectedPhrase: expected.trim() } : {}),
         success,
         durationMs: Date.now() - started,
         knowledgeSearches,

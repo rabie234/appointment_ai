@@ -9,6 +9,7 @@ export interface IAIRun {
   passed?: boolean;
   actor: string;
   question?: string;
+  expectedPhrase?: string;
   createdAt: Date;
 }
 
@@ -23,6 +24,7 @@ const AIRunSchema = new Schema<IAIRun>(
     actor: { type: String, required: true },
     // Only sandbox questions are recorded here. Patient messages stay in their conversations.
     question: String,
+    expectedPhrase: { type: String, maxlength: 300 },
   },
   { timestamps: { createdAt: true, updatedAt: false } },
 );
