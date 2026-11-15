@@ -1,5 +1,5 @@
 import mongoose, { Schema, Document, Model } from 'mongoose';
-import { type DayHours, defaultWeek } from '@/lib/schedule';
+import { type Day, type DayHours, defaultWeek } from '@/lib/schedule';
 
 /**
  * A singleton document holding the clinic's weekly opening hours. We pin it to a
@@ -9,6 +9,8 @@ import { type DayHours, defaultWeek } from '@/lib/schedule';
 export interface IClinicHours extends Document {
   key: string;
   hours: DayHours[];
+  lastChangedDays: Day[];
+  version: number;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -19,6 +21,18 @@ const DayHoursSchema = new Schema<DayHours>(
     open: { type: String, default: '09:00' },
     close: { type: String, default: '17:00' },
     closed: { type: Boolean, default: false },
+    intervals: {
+      type: [
+        new Schema(
+          {
+            open: { type: String, required: true },
+            close: { type: String, required: true },
+          },
+          { _id: false }
+        ),
+      ],
+      default: undefined,
+    },
   },
   { _id: false }
 );
@@ -34,6 +48,11 @@ const ClinicHoursSchema = new Schema<IClinicHours>(
       type: [DayHoursSchema],
       default: defaultWeek,
     },
+    lastChangedDays: {
+      type: [String],
+      default: [],
+    },
+    version: { type: Number, default: 0 },
   },
   { timestamps: true }
 );

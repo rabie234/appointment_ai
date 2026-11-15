@@ -11,29 +11,41 @@ export default async function DoctorsListingPage() {
     await connectDB()
 
     const [doctorDocs, specialtyDocs] = await Promise.all([
-        // Patients only ever see active doctors.
         Doctor.find({ status: "active" }).sort({ name: 1 }).lean(),
         Specialty.find().sort({ name: 1 }).lean(),
     ])
 
-    const doctors: DoctorCard[] = doctorDocs.map((d) => ({
-        id: String(d._id),
-        name: d.name,
-        specialty: d.specialty,
-        rating: d.rating ?? 0,
-        reviews: d.reviews ?? 0,
-        available: d.availability === "available",
-        image: d.image ?? "",
+    // Prepare doctor data for the listing
+    const doctors: DoctorCard[] = doctorDocs.map((doctor) => ({
+        id: String(doctor._id),
+        name: doctor.name,
+        nameAr: doctor.nameAr?.trim() || "",
+        specialty: doctor.specialty,
+        available: doctor.availability === "available",
+        image: doctor.image ?? "",
     }))
 
-    // Offer the specialties admins defined, plus any a doctor uses that isn't
-    // in that list yet, so the filter never hides a bookable doctor.
+    // Prepare Arabic specialty translations
+    const specialtyMap: Record<string, string> = {}
+
+    for (const specialty of specialtyDocs) {
+        specialtyMap[specialty.name] =
+            specialty.nameAr?.trim() || specialty.name
+    }
+
+    // Include specialties used by active doctors
     const specialties = Array.from(
         new Set([
-            ...specialtyDocs.map((s) => s.name),
-            ...doctors.map((d) => d.specialty),
+            ...specialtyDocs.map((specialty) => specialty.name),
+            ...doctors.map((doctor) => doctor.specialty),
         ])
     ).sort()
 
-    return <DoctorsListing doctors={doctors} specialties={specialties} />
+    return (
+        <DoctorsListing
+            doctors={doctors}
+            specialties={specialties}
+            specialtyArabic={specialtyMap}
+        />
+    )
 }

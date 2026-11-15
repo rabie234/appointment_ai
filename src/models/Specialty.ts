@@ -2,7 +2,9 @@ import mongoose, { Schema, Document, Model } from 'mongoose';
 
 export interface ISpecialty extends Document {
   name: string;
+  nameAr?: string;
   description?: string;
+  descriptionAr?: string;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -15,10 +17,20 @@ const SpecialtySchema = new Schema<ISpecialty>(
       unique: true,
       trim: true,
     },
+    nameAr: {
+  type: String,
+  trim: true,
+},
     description: {
-      type: String,
-      trim: true,
-    },
+  type: String,
+  trim: true,
+},
+descriptionAr: {
+  type: String,
+  trim: true,
+  default: "",
+},
+    
   },
   {
     timestamps: true,

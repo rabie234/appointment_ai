@@ -1,198 +1,414 @@
-'use server';
 
-import { revalidatePath } from 'next/cache';
-import connectDB from '@/lib/mongodb';
-import { requireRole } from '@/lib/session';
+"use server"
+
+import { revalidatePath } from "next/cache"
+import connectDB from "@/lib/mongodb"
+import { requireRole } from "@/lib/session"
 import {
   availableSlots,
   dayOfWeek,
   isValidTime,
   normalizeWeek,
   slotsForDay,
-} from '@/lib/schedule';
-import Appointment from '@/models/Appointment';
-import Doctor from '@/models/Doctor';
+  intersectSchedules,
+} from "@/lib/schedule"
+import Appointment from "@/models/Appointment"
+import Doctor from "@/models/Doctor"
+import DoctorLeave from "@/models/DoctorLeave"
+import { parseCalendarDate as parseDay } from "@/lib/date-validation"
+import { notifyAppointmentParties } from "@/lib/notification-service"
+import { getClinicHours } from "@/lib/clinic-hours"
+import { isPastClinicSlot } from "@/lib/slots-server"
+import {
+  applyTransition,
+  type NextStatus,
+} from "@/lib/appointment-transitions"
+import {
+  findActiveAppointmentInSpecialty,
+  findPatientTimeConflict,
+} from "@/lib/booking-policy"
 
-export type AppointmentActionState = { error?: string; success?: boolean };
+export type AppointmentActionState = {
+  error?: string
+  success?: boolean
+}
 
-type Status = 'pending' | 'confirmed' | 'in-progress' | 'completed' | 'cancelled';
-type NextStatus = 'confirmed' | 'in-progress' | 'completed' | 'cancelled';
+async function transition(
+  id: string,
+  next: NextStatus,
+  cancellationReason?: string,
+): Promise<AppointmentActionState> {
+  await requireRole("admin")
 
-// The statuses an admin is allowed to set, and which current states each may
-// come from. Guards against nonsensical transitions (e.g. completing a visit
-// that never started, or reviving a cancelled one). The visit lifecycle is
-// pending → confirmed → in-progress → completed, with cancel available until
-// the visit starts.
-const TRANSITIONS: Record<NextStatus, Status[]> = {
-  confirmed: ['pending'],
-  'in-progress': ['pending', 'confirmed'],
-  completed: ['in-progress'],
-  cancelled: ['pending', 'confirmed'],
-};
+  const result = await applyTransition({ id, next, cancellationReason })
 
-async function transition(id: string, next: NextStatus): Promise<AppointmentActionState> {
-  await requireRole('admin');
-  if (!id) return { error: 'Missing appointment id' };
+  if (result.success) {
+    const events = {
+      confirmed: {
+        patientTitle: "Notification: Appointment confirmed",
+        patientBody: "Notification body: Your appointment has been confirmed.",
+        doctorTitle: "Notification: Appointment confirmed",
+        doctorBody: "Notification body: A confirmed appointment was added to your schedule.",
+      },
+      cancelled: {
+        patientTitle: "Notification: Appointment cancelled",
+        patientBody: "Notification body: Your appointment was cancelled by the clinic.",
+        doctorTitle: "Notification: Appointment cancelled",
+        doctorBody: "Notification body: An appointment on your schedule was cancelled.",
+      },
+      "in-progress": {
+        patientTitle: "Notification: Visit started",
+        patientBody: "Notification body: Your visit has started.",
+        doctorTitle: "Notification: Visit started",
+        doctorBody: "Notification body: A visit on your schedule has started.",
+      },
+      completed: {
+        patientTitle: "Notification: Visit completed",
+        patientBody: "Notification body: Your appointment was marked as completed.",
+        doctorTitle: "Notification: Visit completed",
+        doctorBody: "Notification body: An appointment was marked complete.",
+      },
+      missed: {
+        patientTitle: "Notification: Appointment marked missed",
+        patientBody: "Notification body: Your appointment was marked as missed.",
+        doctorTitle: "Notification: Appointment marked missed",
+        doctorBody: "Notification body: An appointment was marked as missed.",
+      },
+    } as const
 
-  await connectDB();
+    const event = events[next as keyof typeof events]
 
-  const appt = await Appointment.findById(id).select('status startedAt completedAt');
-  if (!appt) return { error: 'Appointment not found' };
+    if (event) {
+      await notifyAppointmentParties(
+        id,
+        {
+          category: "appointment",
+          titleKey: event.patientTitle,
+          bodyKey: event.patientBody,
+          href: "/appointments",
+        },
+        {
+          category: "appointment",
+          titleKey: event.doctorTitle,
+          bodyKey: event.doctorBody,
+          href: "/doctor/appointments",
+        }
+      )
+    }
 
-  if (!TRANSITIONS[next].includes(appt.status)) {
-    return { error: `Cannot move a ${appt.status} appointment to ${next}` };
+    revalidatePath("/appointments")
+    revalidatePath("/admin/appointments")
+    revalidatePath("/doctor/appointments")
   }
 
-  try {
-    appt.status = next;
-    // Stamp the real check-in / check-out times as the visit progresses.
-    if (next === 'in-progress') appt.startedAt = new Date();
-    if (next === 'completed') appt.completedAt = new Date();
-    await appt.save();
-  } catch (error) {
-    console.error(`Set appointment ${next} failed:`, error);
-    return { error: 'Could not update the appointment. Please try again.' };
-  }
-
-  revalidatePath('/admin/appointments');
-  return { success: true };
+  return result
 }
 
 export async function confirmAppointment(id: string) {
-  return transition(id, 'confirmed');
+  return transition(id, "confirmed")
 }
 
 /** Patient has arrived — start the visit (records startedAt). */
 export async function startAppointment(id: string) {
-  return transition(id, 'in-progress');
+  return transition(id, "in-progress")
 }
 
 /** Patient has left — complete the visit (records completedAt). */
 export async function completeAppointment(id: string) {
-  return transition(id, 'completed');
+  return transition(id, "completed")
 }
 
-export async function cancelAppointment(id: string) {
-  return transition(id, 'cancelled');
+export async function cancelAppointment(
+  id: string,
+  cancellationReason?: string,
+) {
+  return transition(id, "cancelled", cancellationReason)
 }
 
-// ── Admin-created appointments ──────────────────────────────────────────────
-
-const CONSULTATION_FEE = 120;
-
-/** Parse "YYYY-MM-DD" into a UTC-midnight date. null if malformed. */
-function parseDay(value: string): Date | null {
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return null;
-  const date = new Date(`${value}T00:00:00.000Z`);
-  return Number.isNaN(date.getTime()) ? null : date;
+export async function markAppointmentMissed(id: string) {
+  return transition(id, "missed")
 }
 
+// Admin-created appointments
+
+const CONSULTATION_FEE = 120
+
+/** The UTC start and exclusive end of a calendar day. */
 function dayBounds(date: Date): { start: Date; end: Date } {
-  const start = new Date(date);
-  start.setUTCHours(0, 0, 0, 0);
-  const end = new Date(start);
-  end.setUTCDate(end.getUTCDate() + 1);
-  return { start, end };
+  const start = new Date(date)
+  start.setUTCHours(0, 0, 0, 0)
+
+  const end = new Date(start)
+  end.setUTCDate(end.getUTCDate() + 1)
+
+  return { start, end }
 }
 
-/** "HH:MM" slots already taken (any non-cancelled status) for a doctor on a day. */
-async function bookedTimes(doctorId: string, date: Date): Promise<Set<string>> {
-  const { start, end } = dayBounds(date);
+/** Times already booked for a doctor on a day. */
+async function bookedTimes(
+  doctorId: string,
+  date: Date,
+): Promise<Set<string>> {
+  const { start, end } = dayBounds(date)
+
   const existing = await Appointment.find({
     doctor: doctorId,
     date: { $gte: start, $lt: end },
-    status: { $ne: 'cancelled' },
+    status: { $ne: "cancelled" },
   })
-    .select('time')
-    .lean();
-  return new Set(existing.map((a) => a.time));
+    .select("time")
+    .lean()
+
+  return new Set(existing.map((appointment) => appointment.time))
 }
 
-export type AdminSlotsResult = { slots?: string[]; error?: string };
+/** True for approved leave and older records without a status field. */
+async function isDoctorOnLeave(
+  doctorId: string,
+  date: Date,
+): Promise<boolean> {
+  const { start, end } = dayBounds(date)
 
-/** Free slots for a doctor on a date — admin variant of the patient booking. */
+  const leave = await DoctorLeave.findOne({
+    doctor: doctorId,
+    startDate: { $lt: end },
+    endDate: { $gt: start },
+    $or: [
+      { status: "approved" },
+      { status: { $exists: false } },
+    ],
+  })
+    .select("_id")
+    .lean()
+
+  return Boolean(leave)
+}
+
+export type AdminSlotsResult = {
+  slots?: string[]
+  error?: string
+}
+
+/** Free slots for a doctor on a date — Admin booking screen. */
 export async function getDoctorSlots(
   doctorId: string,
-  dateStr: string
+  dateStr: string,
+  patientId?: string,
 ): Promise<AdminSlotsResult> {
-  await requireRole('admin');
+  await requireRole("admin")
 
-  const date = parseDay(dateStr);
-  if (!date) return { error: 'Invalid date' };
+  const date = parseDay(dateStr)
+  if (!date) return { error: "Invalid date" }
 
-  await connectDB();
+  await connectDB()
 
-  const doctor = await Doctor.findById(doctorId).select('schedule status').lean();
-  if (!doctor) return { error: 'Doctor not found' };
-  if (doctor.status !== 'active') return { slots: [] };
+  const doctor = await Doctor.findById(doctorId)
+    .select("schedule status")
+    .lean()
 
-  const schedule = normalizeWeek(doctor.schedule);
-  const taken = await bookedTimes(doctorId, date);
-  return { slots: availableSlots(schedule, date, taken) };
+  if (!doctor) return { error: "Doctor not found" }
+  if (doctor.status !== "active") return { slots: [] }
+
+  if (await isDoctorOnLeave(doctorId, date)) {
+    return { slots: [] }
+  }
+
+  const schedule = intersectSchedules(
+    normalizeWeek(doctor.schedule),
+    await getClinicHours(),
+  )
+  const taken = await bookedTimes(doctorId, date)
+
+  const doctorSlots = availableSlots(schedule, date, taken).filter(
+    (slot) => !isPastClinicSlot(dateStr, slot),
+  )
+
+  if (!patientId) {
+    return { slots: doctorSlots }
+  }
+
+  const patientSlots: string[] = []
+
+  for (const slot of doctorSlots) {
+    const conflict = await findPatientTimeConflict(
+      patientId,
+      date,
+      slot,
+    )
+
+    if (!conflict) {
+      patientSlots.push(slot)
+    }
+  }
+
+  return { slots: patientSlots }
 }
 
 /**
- * Create an appointment on a patient's behalf. Same server-side guards as the
- * patient flow: doctor active, time is a real slot for that weekday, date not in
- * the past, and the slot still free.
+ * Creates an appointment for a patient after checking the doctor,
+ * date, schedule, leave, doctor slot availability, and patient conflicts.
  */
 export async function adminCreateAppointment(
   _prev: AppointmentActionState,
-  formData: FormData
+  formData: FormData,
 ): Promise<AppointmentActionState> {
-  await requireRole('admin');
+  await requireRole("admin")
 
-  const patientId = String(formData.get('patientId') ?? '');
-  const doctorId = String(formData.get('doctorId') ?? '');
-  const dateStr = String(formData.get('date') ?? '');
-  const time = String(formData.get('time') ?? '');
-  const type = String(formData.get('type') ?? 'in-person') === 'video' ? 'video' : 'in-person';
+  const patientId = String(formData.get("patientId") ?? "")
+  const doctorId = String(formData.get("doctorId") ?? "")
+  const dateStr = String(formData.get("date") ?? "")
+  const time = String(formData.get("time") ?? "")
+  const type =
+    String(formData.get("type") ?? "in-person") === "video"
+      ? "video"
+      : "in-person"
 
   if (!patientId || !doctorId || !dateStr || !time) {
-    return { error: 'Patient, doctor, date and time are all required' };
+    return {
+      error: "Patient, doctor, date and time are all required",
+    }
   }
 
-  const date = parseDay(dateStr);
-  if (!date) return { error: 'Invalid date' };
-  if (!isValidTime(time)) return { error: 'Invalid time' };
+  const date = parseDay(dateStr)
+  if (!date) return { error: "Invalid date" }
+  if (!isValidTime(time)) return { error: "Invalid time" }
 
-  const today = new Date();
-  today.setUTCHours(0, 0, 0, 0);
-  if (date < today) return { error: 'That date has already passed' };
+  if (isPastClinicSlot(dateStr, time)) {
+    return {
+      error: "That time has already passed. Please choose another slot.",
+    }
+  }
 
-  await connectDB();
+  const today = new Date()
+  today.setUTCHours(0, 0, 0, 0)
 
-  const doctor = await Doctor.findById(doctorId).select('schedule status').lean();
-  if (!doctor) return { error: 'Doctor not found' };
-  if (doctor.status !== 'active') return { error: 'This doctor is not accepting appointments' };
+  if (date < today) {
+    return { error: "That date has already passed" }
+  }
 
-  const schedule = normalizeWeek(doctor.schedule);
-  const entry = schedule.find((s) => s.day === dayOfWeek(date));
+  await connectDB()
+
+  const doctor = await Doctor.findById(doctorId)
+    .select("schedule status specialty")
+    .lean()
+
+  if (!doctor) return { error: "Doctor not found" }
+
+  if (doctor.status !== "active") {
+    return { error: "This doctor is not accepting appointments" }
+  }
+
+  // NEW: Check the patient's active appointments across all doctors.
+  const timeConflict = await findPatientTimeConflict(
+    patientId,
+    date,
+    time
+  )
+
+  if (timeConflict) {
+    return {
+      error:
+        `This patient already has an active appointment with Dr. ${timeConflict.doctorName} ` +
+        `on ${timeConflict.date} at ${timeConflict.time}. ` +
+        "Choose a different time.",
+    }
+  }
+
+  // Preserve the existing specialty booking policy.
+  const existingAppointment = await findActiveAppointmentInSpecialty(
+    patientId,
+    doctor.specialty ?? "",
+  )
+
+  if (existingAppointment) {
+    const [hour, minute] = existingAppointment.time.split(":").map(Number)
+    const displayTime = `${hour % 12 || 12}:${String(minute).padStart(2, "0")} ${hour >= 12 ? "PM" : "AM"}`
+
+    return {
+      error:
+        `This patient already has an active ${existingAppointment.specialty} appointment ` +
+        `with Dr. ${existingAppointment.doctorName} on ${existingAppointment.date} at ${displayTime}. ` +
+        "Complete or cancel it before booking another appointment in this specialty.",
+    }
+  }
+
+  if (await isDoctorOnLeave(doctorId, date)) {
+    return { error: "The doctor is on leave on this date." }
+  }
+
+  const schedule = intersectSchedules(
+    normalizeWeek(doctor.schedule),
+    await getClinicHours(),
+  )
+  const entry = schedule.find((item) => item.day === dayOfWeek(date))
+
   if (!entry || entry.closed || !slotsForDay(entry).includes(time)) {
-    return { error: 'The doctor is not available at that time' };
+    return { error: "The doctor is not available at that time" }
   }
 
-  const taken = await bookedTimes(doctorId, date);
+  const taken = await bookedTimes(doctorId, date)
+
   if (taken.has(time)) {
-    return { error: 'That slot is already taken. Please pick another time.' };
+    return {
+      error: "That slot is already taken. Please pick another time.",
+    }
   }
+
+  // Recheck just before creation to reduce the chance of a stale check.
+  const latestTimeConflict = await findPatientTimeConflict(
+    patientId,
+    date,
+    time
+  )
+
+  if (latestTimeConflict) {
+    return {
+      error:
+        `This patient already has an active appointment with Dr. ${latestTimeConflict.doctorName} ` +
+        `on ${latestTimeConflict.date} at ${latestTimeConflict.time}. ` +
+        "Choose a different time.",
+    }
+  }
+
+  let appointmentId = ""
 
   try {
-    await Appointment.create({
+    const appointment = await Appointment.create({
       patient: patientId,
       doctor: doctorId,
       date,
       time,
       type,
       // Admin-created bookings are confirmed straight away.
-      status: 'confirmed',
+      status: "confirmed",
       price: CONSULTATION_FEE,
-    });
+    })
+
+    appointmentId = String(appointment._id)
   } catch (error) {
-    console.error('Admin create appointment failed:', error);
-    return { error: 'Could not create the appointment. Please try again.' };
+    console.error("Admin create appointment failed:", error)
+
+    return {
+      error: "Could not create the appointment. Please try again.",
+    }
   }
 
-  revalidatePath('/admin/appointments');
-  return { success: true };
+  await notifyAppointmentParties(
+    appointmentId,
+    {
+      category: "appointment",
+      titleKey: "Appointment confirmed",
+      bodyKey: "Your appointment has been confirmed.",
+      href: "/appointments",
+    },
+    {
+      category: "appointment",
+      titleKey: "Appointment confirmed",
+      bodyKey: "Notification body: A confirmed appointment was added to your schedule.",
+      href: "/doctor/appointments",
+    }
+  )
+
+  revalidatePath("/admin/appointments")
+  return { success: true }
 }

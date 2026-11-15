@@ -120,12 +120,25 @@ export function documentEntries(
   return entries;
 }
 
+/**
+ * Fast, deterministic first pass. Ignores case, punctuation, and repeated
+ * whitespace. Semantic equivalence (synonyms or paraphrases) is evaluated
+ * separately by the AI trainer when this returns false.
+ */
 export function matchesExpectedAnswer(
   answer: string,
   expected: string,
 ): boolean | null {
-  if (!expected.trim()) return null;
-  return answer
-    .toLocaleLowerCase()
-    .includes(expected.trim().toLocaleLowerCase());
+  const normalize = (value: string) =>
+    value
+      .normalize("NFKC")
+      .toLocaleLowerCase()
+      .replace(/[^\p{L}\p{N}\s]/gu, " ")
+      .replace(/\s+/g, " ")
+      .trim();
+
+  const normalizedExpected = normalize(expected);
+  if (!normalizedExpected) return null;
+
+  return normalize(answer).includes(normalizedExpected);
 }

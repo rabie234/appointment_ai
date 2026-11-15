@@ -1,3 +1,4 @@
+
 "use client"
 
 import { useState, useTransition, useActionState, useEffect } from "react"
@@ -5,6 +6,9 @@ import { useFormStatus } from "react-dom"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { cn } from "@/lib/utils"
+import { useLanguage } from "@/components/i18n/language-provider"
+import { formatTime12h } from "@/lib/time-format"
+import { t } from "@/components/i18n/translations"
 import {
     Calendar as CalendarIcon,
     Video,
@@ -12,67 +16,147 @@ import {
     Loader2,
     CheckCircle2,
 } from "lucide-react"
-import { getAvailableSlots, bookAppointment, type BookingState } from "./actions"
-
-/** Next `count` calendar days as {value: "YYYY-MM-DD", label, weekday}. */
-function upcomingDays(count: number) {
+import {
+    getAvailableSlots,
+    bookAppointment,
+    type BookingState,
+} from "./actions"
+import { useRouter, useSearchParams } from "next/navigation"
+import { rescheduleLeaveConflictAppointment } from "../../appointments/actions"
+function upcomingDays(count: number, language: "en" | "ar", openWeekdays: string[]) {
     const out: { value: string; label: string; weekday: string }[] = []
-    const today = new Date()
+    const todayParts = new Intl.DateTimeFormat("en-CA", {
+        timeZone: "Asia/Beirut",
+        year: "numeric",
+        month: "2-digit",
+        day: "2-digit",
+    }).formatToParts(new Date())
+    const todayValues = Object.fromEntries(
+        todayParts.map(({ type, value }) => [type, value]),
+    )
+    const today = `${todayValues.year}-${todayValues.month}-${todayValues.day}`
+
     for (let i = 0; i < count; i++) {
-        const d = new Date(today)
-        d.setDate(today.getDate() + i)
+        const d = new Date(`${today}T00:00:00.000Z`)
+        d.setUTCDate(d.getUTCDate() + i)
+        const weekdayKey = d.toLocaleDateString("en-US", {
+            weekday: "long",
+            timeZone: "UTC",
+        })
+        if (!openWeekdays.includes(weekdayKey)) continue
+
         out.push({
             value: d.toISOString().slice(0, 10),
-            label: d.toLocaleDateString("en-US", { month: "short", day: "numeric" }),
-            weekday: d.toLocaleDateString("en-US", { weekday: "short" }),
+            label: d.toLocaleDateString(language === "ar" ? "ar-LB" : "en-US", {
+                month: "short",
+                day: "numeric",
+                timeZone: "UTC",
+            }),
+            weekday: d.toLocaleDateString(language === "ar" ? "ar-LB" : "en-US", {
+                weekday: "short",
+                timeZone: "UTC",
+            }),
         })
     }
+
     return out
 }
 
-/** "HH:MM" (24h) → "h:MM AM/PM" for display. */
-function pretty(time: string): string {
+function pretty(time: string, language: "en" | "ar"): string {
     const [h, m] = time.split(":").map(Number)
-    const period = h >= 12 ? "PM" : "AM"
-    const hour12 = h % 12 === 0 ? 12 : h % 12
-    return `${hour12}:${String(m).padStart(2, "0")} ${period}`
+    if (Number.isNaN(h) || Number.isNaN(m)) return time
+
+    const date = new Date(Date.UTC(2026, 0, 1, h, m))
+
+    return new Intl.DateTimeFormat(language === "ar" ? "ar-LB" : "en-US", {
+        hour: "numeric",
+        minute: "2-digit",
+        hour12: true,
+        timeZone: "UTC",
+    }).format(date)
 }
 
 export function BookingPanel({
     doctorId,
     fee,
     active,
+    openWeekdays,
 }: {
     doctorId: string
     fee: number
     active: boolean
+    openWeekdays: string[]
 }) {
-    const days = upcomingDays(14)
-    const [selectedDate, setSelectedDate] = useState(days[0].value)
+    const { language } = useLanguage()
+    const days = upcomingDays(14, language, openWeekdays)
+    const [selectedDate, setSelectedDate] = useState(days[0]?.value ?? "")
     const [selectedTime, setSelectedTime] = useState<string | null>(null)
     const [type, setType] = useState<"in-person" | "video">("in-person")
-
     const [slots, setSlots] = useState<string[]>([])
     const [loadingSlots, startLoadingSlots] = useTransition()
-
     const [state, formAction] = useActionState<BookingState, FormData>(bookAppointment, {})
+    const [onLeave, setOnLeave] = useState(false)
+   const router = useRouter()
+const searchParams = useSearchParams()
+const rescheduleAppointmentId = searchParams.get("rescheduleAppointmentId")
+const [rescheduling, setRescheduling] = useState(false)
 
-    // Whenever the chosen date changes, fetch that day's free slots. The
-    // previously selected time is cleared in the date-change handler (an event),
-    // not here, so this effect only synchronises with the server.
     useEffect(() => {
-        if (!active) return
-        startLoadingSlots(async () => {
-            const res = await getAvailableSlots(doctorId, selectedDate)
-            setSlots(res.slots ?? [])
-        })
-    }, [selectedDate, doctorId, active])
+    if (!active || !selectedDate) {
+        setSlots([])
+        return
+    }
 
+    startLoadingSlots(async () => {
+        const res = await getAvailableSlots(
+    doctorId,
+    selectedDate,
+    rescheduleAppointmentId ?? undefined
+)
+        setSlots(res.slots ?? [])
+        setOnLeave(res.onLeave ?? false)
+    })
+}, [selectedDate, doctorId, active])
     function pickDate(value: string) {
         setSelectedTime(null)
         setSelectedDate(value)
     }
+   async function handleBookingSubmit(
+    event: React.FormEvent<HTMLFormElement>
+) {
+    if (!rescheduleAppointmentId) return
 
+    event.preventDefault()
+
+    if (!selectedTime) return
+
+    setRescheduling(true)
+
+    try {
+        const result = await rescheduleLeaveConflictAppointment(
+            rescheduleAppointmentId,
+            selectedDate,
+            selectedTime
+        )
+if (!result.success) {
+    window.alert(
+        t(language, result.message || "Could not reschedule the appointment.")
+    )
+    return
+}
+
+        router.push("/appointments")
+        router.refresh()
+    } catch {
+        window.alert(
+            language === "ar"
+                ? "حدث خطأ أثناء إعادة جدولة الموعد."
+                : "An error occurred while rescheduling."
+        )
+    } finally {
+        setRescheduling(false)
+    }
+}
     if (state.success) {
         return (
             <Card className="sticky top-24 border-none shadow-lg bg-card">
@@ -81,13 +165,15 @@ export function BookingPanel({
                         <CheckCircle2 className="h-8 w-8 text-emerald-600" />
                     </div>
                     <div>
-                        <h3 className="text-lg font-bold">Appointment requested</h3>
+                        <h3 className="text-lg font-bold">
+                            {t(language, "Appointment requested")}
+                        </h3>
                         <p className="text-sm text-muted-foreground mt-1">
-                            Your booking is pending confirmation. Track it under My Appointments.
+                            {t(language, "Your booking is pending confirmation. Track it under My Appointments.")}
                         </p>
                     </div>
                     <Button variant="outline" onClick={() => window.location.assign("/appointments")}>
-                        Go to My Appointments
+                        {t(language, "Go to My Appointments")}
                     </Button>
                 </CardContent>
             </Card>
@@ -99,47 +185,62 @@ export function BookingPanel({
             <CardHeader>
                 <CardTitle className="flex items-center gap-2">
                     <CalendarIcon className="h-5 w-5 text-primary" />
-                    Book Appointment
+                    {t(language, "Book Appointment")}
                 </CardTitle>
             </CardHeader>
+
             <CardContent>
                 {!active ? (
                     <p className="text-sm text-muted-foreground py-6 text-center">
-                        This doctor is currently not accepting appointments.
+                        {t(language, "This doctor is currently not accepting appointments.")}
                     </p>
                 ) : (
-                    <form action={formAction} className="space-y-6">
+                  <form
+    action={formAction}
+    onSubmit={handleBookingSubmit}
+    className="space-y-6"
+>
                         <input type="hidden" name="doctorId" value={doctorId} />
                         <input type="hidden" name="date" value={selectedDate} />
                         <input type="hidden" name="time" value={selectedTime ?? ""} />
                         <input type="hidden" name="type" value={type} />
 
-                        {/* Date picker */}
                         <div>
-                            <p className="text-sm font-semibold mb-3 tracking-tight">Select Date</p>
+                            <p className="text-sm font-semibold mb-3 tracking-tight">
+                                {t(language, "Select Date")}
+                            </p>
+                            {days.length === 0 ? (
+                                <p className="rounded-lg border px-3 py-6 text-center text-sm text-muted-foreground">
+                                    {t(language, "No appointment days are currently available.")}
+                                </p>
+                            ) : (
                             <div className="grid grid-cols-4 gap-2">
                                 {days.slice(0, 8).map((d) => (
                                     <button
                                         type="button"
                                         key={d.value}
                                         onClick={() => pickDate(d.value)}
-                                        className={cn(
-                                            "px-1 py-2 text-xs rounded-lg border transition-all flex flex-col items-center",
-                                            selectedDate === d.value
-                                                ? "bg-primary text-primary-foreground border-primary"
-                                                : "hover:border-primary hover:text-primary"
-                                        )}
+                                       className={cn(
+    "px-1 py-2 text-xs rounded-lg border transition-all flex flex-col items-center",
+    onLeave && selectedDate === d.value
+        ? "border-red-500 bg-red-50 text-red-700 dark:bg-red-950 dark:text-red-300"
+        : selectedDate === d.value
+            ? "bg-primary text-primary-foreground border-primary"
+            : "hover:border-primary hover:text-primary"
+)}
                                     >
                                         <span className="opacity-70">{d.weekday}</span>
                                         <span className="font-semibold">{d.label}</span>
                                     </button>
                                 ))}
                             </div>
+                            )}
                         </div>
 
-                        {/* Visit type */}
                         <div>
-                            <p className="text-sm font-semibold mb-3 tracking-tight">Visit Type</p>
+                            <p className="text-sm font-semibold mb-3 tracking-tight">
+                                {t(language, "Visit Type")}
+                            </p>
                             <div className="grid grid-cols-2 gap-2">
                                 {([
                                     { key: "in-person", label: "In-Person", Icon: MapPin },
@@ -157,23 +258,29 @@ export function BookingPanel({
                                         )}
                                     >
                                         <Icon className="h-3.5 w-3.5" />
-                                        {label}
+                                        {t(language, label)}
                                     </button>
                                 ))}
                             </div>
                         </div>
 
-                        {/* Slots */}
                         <div>
-                            <p className="text-sm font-semibold mb-3 tracking-tight">Select Time Slot</p>
+                            <p className="text-sm font-semibold mb-3 tracking-tight">
+                                {t(language, "Select Time Slot")}
+                            </p>
+
                             {loadingSlots ? (
                                 <div className="flex items-center justify-center py-8 text-muted-foreground">
                                     <Loader2 className="h-5 w-5 animate-spin" />
                                 </div>
-                            ) : slots.length === 0 ? (
-                                <p className="text-sm text-muted-foreground py-6 text-center border rounded-lg">
-                                    No available slots on this day.
-                                </p>
+                           ) : onLeave ? (
+    <p className="text-sm font-medium text-red-700 dark:text-red-300 py-6 px-3 text-center border border-red-300 bg-red-50 dark:bg-red-950 rounded-lg">
+        {t(language, "The doctor is on leave on this date. Please select another date.")}
+    </p>
+) : slots.length === 0 ? (
+    <p className="text-sm text-muted-foreground py-6 text-center border rounded-lg">
+        {t(language, "No available slots on this day.")}
+    </p>
                             ) : (
                                 <div className="grid grid-cols-3 gap-2">
                                     {slots.map((time) => (
@@ -188,7 +295,7 @@ export function BookingPanel({
                                                     : "hover:border-primary hover:text-primary"
                                             )}
                                         >
-                                            {pretty(time)}
+                                            {pretty(time, language)}
                                         </button>
                                     ))}
                                 </div>
@@ -196,19 +303,48 @@ export function BookingPanel({
                         </div>
 
                         {state.error && (
-                            <p className="rounded-md bg-destructive/10 px-3 py-2 text-sm font-medium text-destructive">
-                                {state.error}
-                            </p>
+                            <div className="rounded-md bg-destructive/10 px-3 py-2 text-sm font-medium text-destructive">
+                                <p>{t(language, state.error)}</p>
+                                {state.existingAppointment && (
+                                    <p className="mt-1 text-xs">
+                                        {state.existingAppointment.doctorName} ·{" "}
+                                        {state.existingAppointment.specialty} ·{" "}
+                                        {state.existingAppointment.date} ·{" "}
+                                        {formatTime12h(state.existingAppointment.time, language)}
+                                    </p>
+                                )}
+                            </div>
                         )}
 
                         <div className="pt-4 border-t space-y-4">
                             <div className="flex justify-between items-center text-sm">
-                                <span className="text-muted-foreground">Consultation Fee</span>
+                                <span className="text-muted-foreground">
+                                    {t(language, "Consultation Fee")}
+                                </span>
                                 <span className="font-bold text-lg">${fee.toFixed(2)}</span>
                             </div>
-                            <BookButton disabled={!selectedTime} />
+
+                      {rescheduleAppointmentId ? (
+    <Button
+        type="submit"
+        disabled={!selectedTime || rescheduling}
+        className="w-full gap-2 py-6 text-lg"
+    >
+        {rescheduling && <Loader2 className="h-5 w-5 animate-spin" />}
+        {rescheduling
+            ? language === "ar"
+                ? "جارٍ إعادة الجدولة..."
+                : "Rescheduling..."
+            : language === "ar"
+              ? "تأكيد الموعد الجديد"
+              : "Confirm New Appointment"}
+    </Button>
+) : (
+    <BookButton disabled={!selectedTime} language={language} />
+)}
+
                             <p className="text-[10px] text-center text-muted-foreground px-4">
-                                You won&apos;t be charged yet. Payment is handled at the clinic.
+                                {t(language, "You won't be charged yet. Payment is handled at the clinic.")}
                             </p>
                         </div>
                     </form>
@@ -218,9 +354,15 @@ export function BookingPanel({
     )
 }
 
-function BookButton({ disabled }: { disabled: boolean }) {
-    // useFormStatus must be read from a child of the <form>.
+function BookButton({
+    disabled,
+    language,
+}: {
+    disabled: boolean
+    language: "en" | "ar"
+}) {
     const { pending } = useFormStatus()
+
     return (
         <Button
             type="submit"
@@ -228,7 +370,7 @@ function BookButton({ disabled }: { disabled: boolean }) {
             className="w-full py-6 text-lg shadow-xl shadow-blue-200 gap-2"
         >
             {pending && <Loader2 className="h-5 w-5 animate-spin" />}
-            Book Now
+            {t(language, "Book Now")}
         </Button>
     )
 }

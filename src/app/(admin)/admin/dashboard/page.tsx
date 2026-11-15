@@ -1,12 +1,17 @@
+import Link from "next/link"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import {
     Users,
     Calendar,
     UserPlus,
     Activity,
+    Clock3,
+    AlertTriangle,
     ArrowUpRight,
     ArrowDownRight,
-    MoreHorizontal
+    ArrowRight,
+    Minus,
+    type LucideIcon,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import {
@@ -18,65 +23,315 @@ import {
     TableRow
 } from "@/components/ui/table"
 import { Badge } from "@/components/ui/badge"
+import { cn } from "@/lib/utils"
+import connectDB from "@/lib/mongodb"
+import { requireRole } from "@/lib/session"
+import { dayOfWeek, normalizeWeek, slotsForDay } from "@/lib/schedule"
+import Appointment, { type IAppointment } from "@/models/Appointment"
+import Doctor from "@/models/Doctor"
+import User from "@/models/User"
+import {
+  DashboardText,
+  DashboardStatNote,
+  DashboardTime,
+  DashboardDate,
+  DashboardDoctorName,
+  DashboardSpecialty,
+} from "./dashboard-translations";
 
-const stats = [
-    {
-        title: "Total Doctors",
-        value: "128",
-        change: "+4.5%",
-        trend: "up",
-        icon: Users,
-        color: "text-blue-600",
-        bg: "bg-blue-100 dark:bg-blue-900/20"
-    },
-    {
-        title: "Total Appointments",
-        value: "2,845",
-        change: "+12.1%",
-        trend: "up",
-        icon: Calendar,
-        color: "text-emerald-600",
-        bg: "bg-emerald-100 dark:bg-emerald-900/20"
-    },
-    {
-        title: "Today's Appointments",
-        value: "42",
-        change: "-2.3%",
-        trend: "down",
-        icon: Activity,
-        color: "text-purple-600",
-        bg: "bg-purple-100 dark:bg-purple-900/20"
-    },
-    {
-        title: "Active Patients",
-        value: "8,432",
-        change: "+8.2%",
-        trend: "up",
-        icon: UserPlus,
-        color: "text-orange-600",
-        bg: "bg-orange-100 dark:bg-orange-900/20"
-    },
-]
 
-const recentAppointments = [
-    { id: "1", patient: "Rabie Itwah", doctor: "Dr. Sarah Johnson", date: "Mar 12, 10:30 AM", status: "Confirmed", type: "Video" },
-    { id: "2", patient: "Jane Smith", doctor: "Dr. Michael Chen", date: "Mar 12, 11:15 AM", status: "Pending", type: "In-Person" },
-    { id: "3", patient: "John Doe", doctor: "Dr. Emily Smith", date: "Mar 12, 01:00 PM", status: "Completed", type: "In-Person" },
-    { id: "4", patient: "Alice Brown", doctor: "Dr. Sarah Johnson", date: "Mar 12, 02:30 PM", status: "Confirmed", type: "In-Person" },
-    { id: "5", patient: "Bob Wilson", doctor: "Dr. David Williams", date: "Mar 13, 09:00 AM", status: "Confirmed", type: "Video" },
-]
+// Every number here is live; never serve a cached snapshot.
+export const dynamic = "force-dynamic"
 
-export default function AdminDashboardPage() {
+const DAY_MS = 24 * 60 * 60 * 1000
+/** A patient counts as active with a visit in this many past days, or one upcoming. */
+const ACTIVE_PATIENT_DAYS = 90
+/** Window used for the "vs previous period" comparisons. */
+const COMPARE_DAYS = 30
+/** Upcoming-appointments table length. */
+const UPCOMING_LIMIT = 6
+/** Daily capacity at or above this share is flagged as nearly full. */
+const NEARLY_FULL = 0.9
+
+type Status = IAppointment["status"]
+
+const STATUS_LABEL: Record<Status, string> = {
+    pending: "Pending",
+    confirmed: "Confirmed",
+    "in-progress": "In progress",
+    completed: "Completed",
+    cancelled: "Cancelled",
+    missed: "Missed",
+}
+
+function badgeVariant(status: Status) {
+    switch (status) {
+        case "confirmed":
+        case "in-progress":
+            return "default" as const
+        case "pending":
+            return "secondary" as const
+        case "completed":
+            return "success" as const
+        case "cancelled":
+        case "missed":
+            return "destructive" as const
+    }
+}
+
+
+
+// Appointment dates are stored as UTC midnight, so format them in UTC.
+const shortDay = new Intl.DateTimeFormat("en-US", { weekday: "short", timeZone: "UTC" })
+const monthDay = new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric", timeZone: "UTC" })
+
+type Delta = { text: string; direction: "up" | "down" | "flat"; period: string; unit?: string }
+
+/** Signed change of `current` against `previous`, as a percentage when possible. */
+function delta(current: number, previous: number, period: string): Delta {
+    const periodWithoutUnit = period.replace(/^bookings\s+/, "")
+
+    if (previous === 0) {
+        return current === 0
+            ? { text: "No change", direction: "flat", period }
+            : {
+                  text: `+${current.toLocaleString()}`,
+                  direction: "up",
+                  period: periodWithoutUnit,
+                  unit: "bookings",
+              }
+    }
+
+    const difference = current - previous
+
+    // Percentages are misleading with a very small baseline (for example,
+    // 1 booking growing to 12 appears as +1100%). Show the actual change.
+    if (previous < 5) {
+        if (difference === 0) {
+            return { text: "No change", direction: "flat", period }
+        }
+
+        return {
+            text: `${difference > 0 ? "+" : ""}${difference.toLocaleString()}`,
+            direction: difference > 0 ? "up" : "down",
+            period: periodWithoutUnit,
+            unit: "bookings",
+        }
+    }
+
+    const pct = Math.round((difference / previous) * 100)
+    if (pct === 0) return { text: "0%", direction: "flat", period }
+    return { text: `${pct > 0 ? "+" : ""}${pct}%`, direction: pct > 0 ? "up" : "down", period }
+}
+
+type Stat = {
+    title: string
+    value: number
+    icon: LucideIcon
+    color: string
+    bg: string
+    delta?: Delta
+    note?: string
+}
+
+type UpcomingRow = {
+    id: string
+    patient: string
+    doctor: string
+    specialty: string
+    day: "Today" | "Tomorrow"
+    time: string
+    status: Status
+}
+
+type CapacityDay = {
+  key: string
+  booked: number
+  slots: number
+  isToday: boolean
+}
+
+type PopulatedName = {
+  name?: string;
+  nameAr?: string;
+  specialty?: string;
+} | null
+
+export default async function AdminDashboardPage() {
+    const session = await requireRole("admin")
+    await connectDB()
+
+    const today = new Date()
+    today.setUTCHours(0, 0, 0, 0)
+    const tomorrow = new Date(today.getTime() + DAY_MS)
+    const dayAfter = new Date(today.getTime() + 2 * DAY_MS)
+    const now = new Date()
+    const compareStart = new Date(now.getTime() - COMPARE_DAYS * DAY_MS)
+    const comparePrevStart = new Date(now.getTime() - 2 * COMPARE_DAYS * DAY_MS)
+    const activeSince = new Date(today.getTime() - ACTIVE_PATIENT_DAYS * DAY_MS)
+    // The current Monday-to-Sunday week.
+    const weekStart = new Date(today.getTime() - ((today.getUTCDay() + 6) % 7) * DAY_MS)
+    const weekEnd = new Date(weekStart.getTime() + 7 * DAY_MS)
+
+    const notCancelled = { status: { $ne: "cancelled" } }
+
+    const [
+        activeDoctors,
+        inactiveDoctors,
+        totalAppointments,
+        pendingAppointments,
+        missedAppointments,
+        bookedRecently,
+        bookedPreviously,
+        todayDocs,
+        activePatientIds,
+        registeredPatients,
+        newPatients,
+        upcomingDocs,
+        upcomingTotal,
+        weekCounts,
+    ] = await Promise.all([
+        Doctor.find({ status: "active" }).select("schedule availability").lean(),
+        Doctor.countDocuments({ status: "inactive" }),
+        Appointment.countDocuments(notCancelled),
+        Appointment.countDocuments({ status: "pending" }),
+        Appointment.countDocuments({ status: "missed" }),
+        // Same population as the total (cancelled excluded), so the delta and value agree.
+        Appointment.countDocuments({ createdAt: { $gte: compareStart }, ...notCancelled }),
+        Appointment.countDocuments({ createdAt: { $gte: comparePrevStart, $lt: compareStart }, ...notCancelled }),
+        Appointment.find({ date: { $gte: today, $lt: tomorrow }, ...notCancelled }).select("status").lean(),
+        Appointment.distinct("patient", { date: { $gte: activeSince }, ...notCancelled }),
+        User.countDocuments({ role: "patient" }),
+        User.countDocuments({ role: "patient", createdAt: { $gte: compareStart } }),
+        Appointment.find({
+            date: { $gte: today, $lt: dayAfter },
+            status: { $in: ["pending", "confirmed", "in-progress"] },
+        })
+            .populate<{ patient: PopulatedName }>("patient", "name")
+            .populate<{ doctor: PopulatedName }>(
+  "doctor",
+  "name nameAr specialty"
+)
+            .sort({ date: 1, time: 1 })
+            .limit(UPCOMING_LIMIT)
+            .lean(),
+        Appointment.countDocuments({
+            date: { $gte: today, $lt: dayAfter },
+            status: { $in: ["pending", "confirmed", "in-progress"] },
+        }),
+        Appointment.aggregate<{ _id: Date; count: number }>([
+            { $match: { date: { $gte: weekStart, $lt: weekEnd }, ...notCancelled } },
+            { $group: { _id: "$date", count: { $sum: 1 } } },
+        ]),
+    ])
+
+    // ── Stat tiles ──────────────────────────────────────────────────────────
+
+    const onLeave = activeDoctors.filter((d) => d.availability === "on-leave").length
+    const todayCompleted = todayDocs.filter((a) => a.status === "completed").length
+    const todayRemaining = todayDocs.filter(
+        (a) => a.status === "pending" || a.status === "confirmed" || a.status === "in-progress"
+    ).length
+
+    const stats: Stat[] = [
+        {
+            title: "Active Doctors",
+            value: activeDoctors.length,
+            note: `${onLeave} on leave · ${inactiveDoctors} inactive`,
+            icon: Users,
+            color: "text-blue-600",
+            bg: "bg-blue-100 dark:bg-blue-900/20"
+        },
+        {
+            title: "Total Appointments",
+            value: totalAppointments,
+            delta: delta(bookedRecently, bookedPreviously, `bookings vs previous ${COMPARE_DAYS} days`),
+            icon: Calendar,
+            color: "text-emerald-600",
+            bg: "bg-emerald-100 dark:bg-emerald-900/20"
+        },
+        {
+            title: "Today's Appointments",
+            value: todayDocs.length,
+            note: `${todayCompleted} completed · ${todayRemaining} to go`,
+            icon: Activity,
+            color: "text-purple-600",
+            bg: "bg-purple-100 dark:bg-purple-900/20"
+        },
+        {
+            title: "Active Patients",
+            value: activePatientIds.length,
+            note: `of ${registeredPatients.toLocaleString()} registered · ${newPatients} new in ${COMPARE_DAYS} days`,
+            icon: UserPlus,
+            color: "text-orange-600",
+            bg: "bg-orange-100 dark:bg-orange-900/20"
+        },
+    ]
+
+    // ── Upcoming appointments (today + tomorrow) ────────────────────────────
+
+    const upcoming: UpcomingRow[] = upcomingDocs.map((a) => {
+  const day: "Today" | "Tomorrow" =
+    new Date(a.date).getTime() === today.getTime()
+      ? "Today"
+      : "Tomorrow";
+
+  return {
+    id: String(a._id),
+    patient: a.patient?.name ?? "Unknown patient",
+    doctor: a.doctor?.name ?? "Unknown doctor",
+    specialty: a.doctor?.specialty ?? "",
+    day,
+    time: a.time,
+    status: a.status,
+  };
+});
+    // ── This week's capacity: booked slots vs slots doctors' schedules allow ─
+
+    const schedules = activeDoctors
+    .filter((doctor) => doctor.availability === "available")
+    .map((doctor) => normalizeWeek(doctor.schedule))
+
+    const bookedByDay = new Map(weekCounts.map((w) => [new Date(w._id).toISOString().slice(0, 10), w.count]))
+
+    const week: CapacityDay[] = Array.from({ length: 7 }, (_, i) => {
+        const date = new Date(weekStart.getTime() + i * DAY_MS)
+        const key = date.toISOString().slice(0, 10)
+        // Same weekday lookup the booking flow uses to generate slots.
+        const weekday = dayOfWeek(date)
+        const slots = schedules.reduce((sum, schedule) => {
+            const entry = schedule.find((s) => s.day === weekday)
+            return sum + (entry ? slotsForDay(entry).length : 0)
+        }, 0)
+        return {
+            key,
+            label: shortDay.format(date),
+            date: monthDay.format(date),
+            booked: bookedByDay.get(key) ?? 0,
+            slots,
+            isToday: date.getTime() === today.getTime(),
+        }
+    })
+
+    const weekBooked = week.reduce((sum, d) => sum + d.booked, 0)
+    const weekSlots = week.reduce((sum, d) => sum + d.slots, 0)
+
     return (
         <div className="space-y-8 animate-in fade-in duration-500">
-            <div className="flex items-center justify-between">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
                 <div>
-                    <h1 className="text-3xl font-bold tracking-tight">Dashboard Overview</h1>
-                    <p className="text-muted-foreground mt-1">Welcome back, Admin. Here's what's happening today.</p>
+                    <h1 className="text-3xl font-bold tracking-tight"><DashboardText text="Dashboard Overview" /></h1>
+                    <p className="text-muted-foreground mt-1">
+                        <DashboardText text="Welcome back" />, {session.user.name ?? "Admin"}. <DashboardText text="Here's what's happening today." />
+                    </p>
                 </div>
                 <div className="flex items-center gap-3">
-                    <Button variant="outline" className="hidden sm:flex">Download Report</Button>
-                    <Button className="shadow-lg shadow-blue-200">Generate Insights</Button>
+                    <Link href="/admin/reports" className="hidden sm:flex">
+                        <Button variant="outline"><DashboardText text="View Reports" /></Button>
+                    </Link>
+                    <Link href="/admin/appointments">
+                        <Button className="shadow-lg shadow-blue-200"><DashboardText text="Manage Appointments" /></Button>
+                    </Link>
                 </div>
             </div>
 
@@ -85,107 +340,316 @@ export default function AdminDashboardPage() {
                 {stats.map((stat) => (
                     <Card key={stat.title} className="border-none shadow-sm bg-card/60 backdrop-blur-sm group hover:shadow-md transition-all">
                         <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                            <CardTitle className="text-sm font-medium text-muted-foreground">{stat.title}</CardTitle>
+                            <CardTitle className="text-sm font-medium text-muted-foreground"><DashboardText text={stat.title} /></CardTitle>
                             <div className={`${stat.bg} ${stat.color} p-2 rounded-xl transition-transform group-hover:scale-110`}>
                                 <stat.icon className="h-5 w-5" />
                             </div>
                         </CardHeader>
                         <CardContent>
-                            <div className="text-2xl font-bold">{stat.value}</div>
-                            <div className="flex items-center mt-1">
-                                {stat.trend === "up" ? (
-                                    <ArrowUpRight className="h-4 w-4 text-emerald-500 mr-1" />
-                                ) : (
-                                    <ArrowDownRight className="h-4 w-4 text-destructive mr-1" />
-                                )}
-                                <span className={stat.trend === "up" ? "text-emerald-500 font-medium text-xs" : "text-destructive font-medium text-xs"}>
-                                    {stat.change}
-                                </span>
-                                <span className="text-[10px] text-muted-foreground ml-1">from last month</span>
-                            </div>
+                            <div className="text-2xl font-bold">{stat.value.toLocaleString()}</div>
+                            {stat.delta ? (
+                                <DeltaLine delta={stat.delta} />
+                           ) : stat.note ? (
+    <p className="mt-1 text-xs text-muted-foreground">
+        {stat.title === "Active Doctors" && (
+            <DashboardStatNote
+                kind="doctors"
+                first={onLeave}
+                second={inactiveDoctors}
+            />
+        )}
+
+        {stat.title === "Today's Appointments" && (
+            <DashboardStatNote
+                kind="today"
+                first={todayCompleted}
+                second={todayRemaining}
+            />
+        )}
+
+        {stat.title === "Active Patients" && (
+            <DashboardStatNote
+                kind="patients"
+                first={registeredPatients}
+                second={newPatients}
+                third={COMPARE_DAYS}
+            />
+        )}
+    </p>
+) : null}
                         </CardContent>
                     </Card>
                 ))}
             </div>
 
+            {/* Needs Attention */}
+            <section className="space-y-4" aria-labelledby="needs-attention-heading">
+                <div>
+                    <h2 id="needs-attention-heading" className="text-xl font-bold">
+                        <DashboardText text="Needs Attention" />
+                    </h2>
+                    <p className="mt-1 text-sm text-muted-foreground">
+                        <DashboardText text="Appointments that may need an administrator's follow-up." />
+                    </p>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    {/* Pending Appointments */}
+                    <Card className="border-amber-200/70 dark:border-amber-900/60 bg-card/60 shadow-sm">
+                        <CardContent className="flex items-center justify-between gap-4 p-5">
+                            <div className="flex items-center gap-3">
+                                <div className="rounded-xl bg-amber-100 p-3 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300">
+                                    <Clock3 className="h-5 w-5" />
+                                </div>
+                                <div>
+                                    <p className="font-semibold">
+                                        <DashboardText text="Pending Appointments" />
+                                    </p>
+                                    <p className="mt-1 text-sm text-muted-foreground">
+                                        <DashboardText text="Awaiting confirmation" />
+                                    </p>
+                                </div>
+                            </div>
+                            <div className="text-2xl font-bold tabular-nums">
+                                {pendingAppointments.toLocaleString()}
+                            </div>
+                            <Link
+                                href="/admin/appointments?status=pending"
+                                aria-label="Review pending appointments"
+                            >
+                                <Button variant="outline" size="sm">
+                                    <DashboardText text="Review" />
+                                </Button>
+                            </Link>
+                        </CardContent>
+                    </Card>
+
+                    {/* Missed Appointments */}
+                    <Card className="border-red-200/70 dark:border-red-900/60 bg-card/60 shadow-sm">
+                        <CardContent className="flex items-center justify-between gap-4 p-5">
+                            <div className="flex items-center gap-3">
+                                <div className="rounded-xl bg-red-100 p-3 text-red-700 dark:bg-red-900/30 dark:text-red-300">
+                                    <AlertTriangle className="h-5 w-5" />
+                                </div>
+                                <div>
+                                    <p className="font-semibold">
+                                        <DashboardText text="Missed Appointments" />
+                                    </p>
+                                    <p className="mt-1 text-sm text-muted-foreground">
+                                        <DashboardText text="May need follow-up" />
+                                    </p>
+                                </div>
+                            </div>
+                            <div className="text-2xl font-bold tabular-nums">
+                                {missedAppointments.toLocaleString()}
+                            </div>
+                            <Link
+                                href="/admin/appointments?status=missed"
+                                aria-label="Review missed appointments"
+                            >
+                                <Button variant="outline" size="sm">
+                                    <DashboardText text="Review" />
+                                </Button>
+                            </Link>
+                        </CardContent>
+                    </Card>
+                </div>
+            </section>
+
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-                {/* Recent Appointments Table */}
+                {/* Upcoming Appointments Table */}
                 <Card className="lg:col-span-2 border-none shadow-sm bg-card/60">
                     <CardHeader className="flex flex-row items-center justify-between">
                         <div>
-                            <CardTitle className="text-xl">Recent Appointments</CardTitle>
-                            <p className="text-sm text-muted-foreground mt-1">A list of appointments scheduled for the next 48 hours.</p>
+                            <CardTitle className="text-xl"><DashboardText text="Upcoming Appointments" /></CardTitle>
+                            <p className="text-sm text-muted-foreground mt-1">
+                                {upcomingTotal === 0
+                                    ? <DashboardText text="Nothing scheduled for today or tomorrow." />
+                                    : <><span>{upcomingTotal} </span><DashboardText text="scheduled for today and tomorrow." /></>}
+                            </p>
                         </div>
-                        <Button variant="ghost" size="sm" className="text-primary font-bold">View All</Button>
+                        <Link href="/admin/appointments">
+                            <Button variant="ghost" size="sm" className="text-primary font-bold">
+                                <DashboardText text="View All" />
+                            </Button>
+                        </Link>
                     </CardHeader>
                     <CardContent className="p-0">
                         <Table>
                             <TableHeader>
                                 <TableRow className="hover:bg-transparent border-muted/50">
-                                    <TableHead className="pl-6">Patient</TableHead>
-                                    <TableHead>Doctor</TableHead>
-                                    <TableHead>Date & Time</TableHead>
-                                    <TableHead>Status</TableHead>
-                                    <TableHead className="text-right pr-6">Action</TableHead>
+                                    <TableHead className="pl-6"><DashboardText text="Patient" /></TableHead>
+                                    <TableHead><DashboardText text="Doctor" /></TableHead>
+                                    <TableHead><DashboardText text="Date & Time" /></TableHead>
+                                    <TableHead><DashboardText text="Status" /></TableHead>
+                                    <TableHead className="text-right pr-6"><DashboardText text="Action" /></TableHead>
                                 </TableRow>
                             </TableHeader>
                             <TableBody>
-                                {recentAppointments.map((app) => (
-                                    <TableRow key={app.id} className="group hover:bg-accent/50 transition-colors border-muted/30">
-                                        <TableCell className="pl-6 font-medium">{app.patient}</TableCell>
-                                        <TableCell className="text-muted-foreground font-medium">{app.doctor}</TableCell>
-                                        <TableCell className="text-xs font-semibold">{app.date}</TableCell>
-                                        <TableCell>
-                                            <Badge variant={app.status === "Confirmed" ? "default" : app.status === "Pending" ? "secondary" : "success"}>
-                                                {app.status}
-                                            </Badge>
-                                        </TableCell>
-                                        <TableCell className="text-right pr-6">
-                                            <Button variant="ghost" size="icon" className="h-8 w-8 text-muted-foreground group-hover:text-primary transition-colors">
-                                                <MoreHorizontal className="h-4 w-4" />
-                                            </Button>
+                                {upcoming.length === 0 ? (
+                                    <TableRow>
+                                        <TableCell colSpan={5} className="text-center py-12 text-muted-foreground">
+                                            <DashboardText text="No upcoming appointments in the next two days." />
                                         </TableCell>
                                     </TableRow>
-                                ))}
+                                ) : (
+                                    upcoming.map((app) => (
+                                        <TableRow key={app.id} className="group hover:bg-accent/50 transition-colors border-muted/30">
+                                            <TableCell className="pl-6 font-medium">{app.patient}</TableCell>
+                                            <TableCell>
+                                                <span className="text-muted-foreground font-medium block">
+  <DashboardDoctorName
+    name={app.doctor}
+    nameAr={upcomingDocs.find(
+      (a) => String(a._id) === app.id
+    )?.doctor?.nameAr}
+  />
+</span>
+                                                {app.specialty && (
+                                                    <span className="text-xs text-muted-foreground/80">
+  <DashboardSpecialty specialty={app.specialty} />
+</span>
+                                                )}
+                                            </TableCell>
+                                           <TableCell className="text-xs font-semibold">
+  <DashboardText text={app.day} />,{" "}
+  <DashboardTime time={app.time} />
+</TableCell>
+                                            <TableCell>
+                                                <Badge variant={badgeVariant(app.status)}><DashboardText text={STATUS_LABEL[app.status]} /></Badge>
+                                            </TableCell>
+                                            <TableCell className="text-right pr-6">
+                                                <Link href="/admin/appointments" title="Manage in Appointments">
+                                                    <Button variant="ghost" size="icon" className="h-8 w-8 text-muted-foreground group-hover:text-primary transition-colors">
+                                                        <ArrowRight className="h-4 w-4" />
+                                                    </Button>
+                                                </Link>
+                                            </TableCell>
+                                        </TableRow>
+                                    ))
+                                )}
                             </TableBody>
                         </Table>
                     </CardContent>
                 </Card>
 
-                {/* Mini Chart / Analytics Card */}
+                {/* Weekly Capacity Card */}
                 <Card className="border-none shadow-sm bg-card/60 overflow-hidden relative">
                     <div className="absolute top-0 right-0 p-8 opacity-10">
                         <Activity className="h-32 w-32 text-primary" />
                     </div>
                     <CardHeader>
-                        <CardTitle className="text-xl">Appointment Trends</CardTitle>
-                        <p className="text-sm text-muted-foreground mt-1">Stats for the current week.</p>
+                        <CardTitle className="text-xl">
+    <DashboardText text="This Week's Capacity" />
+</CardTitle>
+                        <p className="text-sm text-muted-foreground mt-1">
+                            {weekSlots === 0
+                                ? <DashboardText text="No doctor working hours are set for this week." />
+                                : <><span>{weekBooked} / {weekSlots} </span><DashboardText text="slots booked" /> ({Math.round((weekBooked / weekSlots) * 100)}%).</>}
+                        </p>
                     </CardHeader>
                     <CardContent>
-                        <div className="space-y-6 mt-4">
-                            {[
-                                { day: "Mon", val: 85, color: "bg-blue-500" },
-                                { day: "Tue", val: 65, color: "bg-blue-400" },
-                                { day: "Wed", val: 92, color: "bg-blue-600" },
-                                { day: "Thu", val: 45, color: "bg-blue-300" },
-                                { day: "Fri", val: 78, color: "bg-blue-500" },
-                            ].map(item => (
-                                <div key={item.day} className="space-y-2">
-                                    <div className="flex justify-between text-xs font-bold uppercase tracking-wider">
-                                        <span>{item.day}</span>
-                                        <span className="text-muted-foreground">{item.val}% Capacity</span>
-                                    </div>
-                                    <div className="h-2 w-full bg-muted rounded-full overflow-hidden">
-                                        <div className={`h-full ${item.color} rounded-full`} style={{ width: `${item.val}%` }} />
-                                    </div>
-                                </div>
+                        <div className="space-y-5 mt-2">
+                            {week.map((day) => (
+                                <CapacityMeter key={day.key} day={day} />
                             ))}
                         </div>
-                        <Button className="w-full mt-10 variant-outline border-primary/20 text-primary hover:bg-primary/5">
-                            View Full Reports
-                        </Button>
+                        <Link href="/admin/reports">
+                            <Button variant="outline" className="w-full mt-8 border-primary/20 text-primary hover:bg-primary/5">
+                                <DashboardText text="View Full Reports" />
+                            </Button>
+                        </Link>
                     </CardContent>
                 </Card>
+            </div>
+        </div>
+    )
+}
+
+/** Change vs a named period. Up is good for every metric that uses this. */
+/** Change vs a named period. */
+function DeltaLine({ delta }: { delta: Delta }) {
+    const Icon =
+        delta.direction === "up"
+            ? ArrowUpRight
+            : delta.direction === "down"
+              ? ArrowDownRight
+              : Minus;
+
+    const tone =
+        delta.direction === "up"
+            ? "text-emesrald-600"
+            : delta.direction === "down"
+              ? "text-destructive"
+              : "text-muted-foreground";
+
+    return (
+        <div className="flex items-center mt-1">
+            <Icon className={cn("h-4 w-4 mr-1", tone)} />
+
+            <span className={cn("font-medium text-xs", tone)}>
+                <DashboardText text={delta.text} />
+            </span>
+            {delta.unit && (
+                <span className={cn("font-medium text-xs ml-1", tone)}>
+                    <DashboardText text={delta.unit} />
+                </span>
+            )}
+
+            <span className="text-[10px] text-muted-foreground ml-1">
+                <DashboardText text={delta.period} />
+            </span>
+        </div>
+    );
+}
+
+/** One day's booked share of bookable slots; amber once it is nearly full. */
+function CapacityMeter({ day }: { day: CapacityDay }) {
+    const closed = day.slots === 0
+    const share = closed ? 0 : Math.min(day.booked / day.slots, 1)
+    const pct = Math.round(share * 100)
+    const nearlyFull = !closed && share >= NEARLY_FULL
+    const summary = closed
+    ? `${day.key}: no working hours`
+    : `${day.key}: ${day.booked} of ${day.slots} slots booked (${pct}%)`
+
+    return (
+        <div className="space-y-2" title={summary}>
+            <div className="flex justify-between items-center text-xs">
+                <span className="font-bold uppercase tracking-wider flex items-center gap-2">
+                    <DashboardDate date={day.key} kind="day" />
+<span className="font-normal normal-case tracking-normal text-muted-foreground">
+    <DashboardDate date={day.key} kind="month-day" />
+</span>
+                </span>
+                <span className="text-muted-foreground">
+                    {closed ? (
+                        <DashboardText text="Closed" />
+                    ) : (
+                        <>
+                            {day.booked}/{day.slots} · {pct}%
+                            {nearlyFull && <span className="ml-1 font-semibold text-amber-700 dark:text-amber-400"><DashboardText text={pct === 100 ? "Full" : "Nearly full"} /></span>}
+                        </>
+                    )}
+                </span>
+            </div>
+            <div
+                role="meter"
+                aria-label={summary}
+                aria-valuemin={0}
+                aria-valuemax={100}
+                aria-valuenow={pct}
+                className={cn(
+                    "h-2 w-full rounded-full overflow-hidden",
+                    closed ? "bg-muted" : nearlyFull ? "bg-amber-100 dark:bg-amber-950" : "bg-blue-100 dark:bg-blue-950"
+                )}
+            >
+                {pct > 0 && (
+                    <div
+                        className={cn("h-full rounded-full", nearlyFull ? "bg-amber-500" : "bg-blue-600 dark:bg-blue-500")}
+                        style={{ width: `${pct}%` }}
+                    />
+                )}
             </div>
         </div>
     )

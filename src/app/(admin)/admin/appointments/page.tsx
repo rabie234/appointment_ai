@@ -1,9 +1,14 @@
+
 import connectDB from "@/lib/mongodb"
 import { requireRole } from "@/lib/session"
-import { slotEnd } from "@/lib/schedule"
+import { getClinicHours } from "@/lib/clinic-hours"
+import { normalizeWeek, slotEnd } from "@/lib/schedule"
 import Appointment from "@/models/Appointment"
 import Doctor from "@/models/Doctor"
+import DoctorLeave from "@/models/DoctorLeave"
 import User from "@/models/User"
+import Specialty from "@/models/Specialty"
+import { isPastClinicSlot } from "@/lib/slots-server"
 import {
     AppointmentsTable,
     type AdminAppointment,
@@ -22,50 +27,77 @@ const dateFmt = new Intl.DateTimeFormat("en-US", {
 
 function to12h(time: string): string {
     const [h, m] = time.split(":").map(Number)
+
     if (Number.isNaN(h)) return time
+
     const period = h >= 12 ? "PM" : "AM"
     const hour12 = h % 12 === 0 ? 12 : h % 12
+
     return `${hour12}:${String(m).padStart(2, "0")} ${period}`
 }
 
-/** "h:MM AM/PM" for an actual timestamp (startedAt/completedAt). */
+/** Format actual timestamps such as startedAt and completedAt. */
 function stampTime(d?: Date | null): string | undefined {
     if (!d) return undefined
-    return new Date(d).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" })
+
+    return new Date(d).toLocaleTimeString("en-US", {
+        hour: "numeric",
+        minute: "2-digit",
+    })
 }
 
-type PopulatedName = { name?: string; specialty?: string } | null
+type PopulatedName = {
+    name?: string
+    nameAr?: string
+    specialty?: string
+} | null
 
-export default async function AdminAppointmentsPage() {
+type AdminAppointmentsPageProps = {
+    searchParams: Promise<{
+        appointmentId?: string
+        status?: string
+    }>
+}
+
+export default async function AdminAppointmentsPage({
+    searchParams,
+}: AdminAppointmentsPageProps) {
+    const { appointmentId, status } = await searchParams
     await requireRole("admin")
     await connectDB()
 
-    const [docs, patientDocs, doctorDocs] = await Promise.all([
+    const [docs, patientDocs, doctorDocs, clinicHours] = await Promise.all([
         Appointment.find()
-            .populate<{ patient: PopulatedName }>("patient", "name")
-            .populate<{ doctor: PopulatedName }>("doctor", "name specialty")
-            // Soonest upcoming first is what an admin working the schedule wants.
+            .populate<{ patient: PopulatedName }>(
+                "patient",
+                "name"
+            )
+            .populate<{ doctor: PopulatedName }>(
+                "doctor",
+                "name nameAr specialty"
+            )
             .sort({ date: 1, time: 1 })
             .lean(),
-        User.find({ role: "patient" }).select("name email").sort({ name: 1 }).lean(),
-        Doctor.find({ status: "active" }).select("name specialty").sort({ name: 1 }).lean(),
+
+        User.find({ role: "patient" })
+            .select("name email")
+            .sort({ name: 1 })
+            .lean(),
+
+        Doctor.find({ status: "active" })
+            .select("name nameAr specialty schedule")
+            .sort({ name: 1 })
+            .lean(),
+        getClinicHours(),
     ])
 
-    const appointments: AdminAppointment[] = docs.map((a) => ({
-        id: String(a._id),
-        patient: a.patient?.name ?? "Unknown patient",
-        doctor: a.doctor?.name ?? "Unknown doctor",
-        specialty: a.doctor?.specialty ?? "",
-        date: dateFmt.format(new Date(a.date)),
-        // Scheduled window, e.g. "9:00 AM – 9:30 AM".
-        time: to12h(a.time),
-        endTime: to12h(slotEnd(a.time)),
-        status: a.status,
-        type: a.type,
-        price: `$${a.price.toFixed(2)}`,
-        startedAt: stampTime(a.startedAt),
-        completedAt: stampTime(a.completedAt),
-    }))
+    const leaveDocs = await DoctorLeave.find({
+        doctor: { $in: doctorDocs.map((doctor) => doctor._id) },
+        endDate: { $gt: new Date() },
+        $or: [{ status: "approved" }, { status: { $exists: false } }],
+    })
+        .select("doctor startDate endDate")
+        .lean()
 
     const patients: PatientOption[] = patientDocs.map((p) => ({
         id: String(p._id),
@@ -73,13 +105,83 @@ export default async function AdminAppointmentsPage() {
         email: p.email,
     }))
 
-    const doctors: DoctorOption[] = doctorDocs.map((d) => ({
-        id: String(d._id),
-        name: d.name,
-        specialty: d.specialty,
-    }))
+    const doctors: DoctorOption[] = await Promise.all(
+        doctorDocs.map(async (doctor) => {
+            const specialtyName = doctor.specialty ?? ""
 
-    return (
-        <AppointmentsTable appointments={appointments} patients={patients} doctors={doctors} />
+            const specialtyDoc = specialtyName
+                ? await Specialty.findOne({
+                      name: specialtyName,
+                  })
+                      .select("name nameAr")
+                      .lean()
+                : null
+
+            return {
+                id: String(doctor._id),
+                name: doctor.name,
+                nameAr: doctor.nameAr?.trim() || "",
+                specialty: specialtyName,
+                specialtyAr:
+                    specialtyDoc?.nameAr?.trim() || specialtyName,
+                schedule: normalizeWeek(doctor.schedule),
+                leavePeriods: leaveDocs
+                    .filter((leave) => String(leave.doctor) === String(doctor._id))
+                    .map((leave) => ({
+                        start: new Date(leave.startDate).toISOString().slice(0, 10),
+                        end: new Date(leave.endDate).toISOString().slice(0, 10),
+                    })),
+            }
+        })
     )
+
+    const appointments: AdminAppointment[] = await Promise.all(
+        docs.map(async (appointment) => {
+            const doctor = appointment.doctor
+
+            const specialtyName = doctor?.specialty ?? ""
+
+            const specialtyDoc = specialtyName
+                ? await Specialty.findOne({
+                      name: specialtyName,
+                  })
+                      .select("name nameAr")
+                      .lean()
+                : null
+
+            return {
+                id: String(appointment._id),
+                scheduledDate: `${new Date(appointment.date).toISOString().slice(0, 10)}T${appointment.time}:00`,
+                scheduledTimePassed: isPastClinicSlot(
+                    new Date(appointment.date).toISOString().slice(0, 10),
+                    appointment.time,
+                ),
+                patient: appointment.patient?.name ?? "Unknown patient",
+                doctor: doctor?.name ?? "Unknown doctor",
+                doctorNameAr: doctor?.nameAr?.trim() || "",
+                specialty: specialtyName,
+                specialtyAr:
+                    specialtyDoc?.nameAr?.trim() || specialtyName,
+                date: dateFmt.format(new Date(appointment.date)),
+                time: to12h(appointment.time),
+                endTime: to12h(slotEnd(appointment.time)),
+                status: appointment.status,
+                type: appointment.type,
+                price: `$${appointment.price.toFixed(2)}`,
+                startedAt: stampTime(appointment.startedAt),
+                completedAt: stampTime(appointment.completedAt),
+            }
+        })
+    )
+    return (
+    <AppointmentsTable
+        appointments={appointments}
+        patients={patients}
+        doctors={doctors}
+        clinicHours={clinicHours}
+        initialSelectedAppointmentId={appointmentId}
+        initialStatus={status}
+    />
+)
 }
+

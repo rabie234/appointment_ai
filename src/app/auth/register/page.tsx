@@ -8,6 +8,8 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { HeartPulse, Loader2 } from "lucide-react"
+import { useLanguage } from "@/components/i18n/language-provider"
+import { t } from "@/components/i18n/translations"
 
 const fields = [
     { id: "name", label: "Full Name", type: "text", placeholder: "John Doe", autoComplete: "name" },
@@ -18,16 +20,16 @@ const fields = [
 
 function SubmitButton() {
     const { pending } = useFormStatus()
-
+    const { language } = useLanguage()
     return (
         <Button type="submit" className="w-full h-11 shadow-lg shadow-blue-200" disabled={pending}>
             {pending ? (
                 <>
                     <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                    Creating account...
+                    {t(language, "Creating account...")}
                 </>
             ) : (
-                "Sign up"
+                t(language, "Sign up")
             )}
         </Button>
     )
@@ -35,7 +37,7 @@ function SubmitButton() {
 
 export default function RegisterPage() {
     const [state, formAction] = useActionState<RegisterState, FormData>(register, {})
-
+    const { language } = useLanguage()
     return (
         <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-primary/5 via-background to-background p-4">
             <Card className="w-full max-w-md border-none shadow-xl bg-card/60 backdrop-blur-sm">
@@ -45,8 +47,8 @@ export default function RegisterPage() {
                             <HeartPulse className="h-7 w-7" />
                         </div>
                     </div>
-                    <CardTitle className="text-2xl font-bold">Create an account</CardTitle>
-                    <CardDescription>Sign up to get started with ClinicAI</CardDescription>
+                    <CardTitle className="text-2xl font-bold"> {t(language,"Create an account")}</CardTitle>
+                    <CardDescription>{t(language,"Sign up to get started with ClinicAI")}</CardDescription>
                 </CardHeader>
                 <CardContent>
                     <form action={formAction} className="space-y-4">
@@ -59,14 +61,18 @@ export default function RegisterPage() {
                         {fields.map((field) => (
                             <div key={field.id} className="space-y-2">
                                 <label htmlFor={field.id} className="text-sm font-medium">
-                                    {field.label}
+                                    {t(language, field.label)}
                                 </label>
                                 <Input
                                     id={field.id}
                                     name={field.id}
                                     type={field.type}
                                     autoComplete={field.autoComplete}
-                                    placeholder={field.placeholder}
+                                    placeholder={
+                                  field.id === "name"
+                                    ? t(language, field.placeholder)
+                                  : field.placeholder
+}
                                     required
                                     className="h-11"
                                 />
@@ -76,9 +82,9 @@ export default function RegisterPage() {
                         <SubmitButton />
                     </form>
                     <div className="mt-4 text-center text-sm">
-                        <span className="text-muted-foreground">Already have an account? </span>
+                        <span className="text-muted-foreground"> {t(language, "Already have an account?")}  </span>
                         <Link href="/auth/login" className="text-primary font-medium hover:underline">
-                            Sign in
+                            {t(language,"Sign in")}
                         </Link>
                     </div>
                 </CardContent>

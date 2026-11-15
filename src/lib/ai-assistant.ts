@@ -14,6 +14,7 @@ import {
   functionDeclarations,
   runTool,
   type BookingSuggestion,
+  type CancellationSuggestion,
 } from "@/app/(patient)/ai-chat/tools";
 import type { KnowledgeHit } from "@/lib/knowledge-core";
 import { GEMINI_MODEL } from "@/lib/ai-config";
@@ -21,6 +22,7 @@ import { GEMINI_MODEL } from "@/lib/ai-config";
 export type AssistantEvent =
   | { type: "delta"; text: string }
   | { type: "suggestion"; data: BookingSuggestion }
+  | { type: "cancel_suggestion"; data: CancellationSuggestion }
   | { type: "sources"; data: KnowledgeHit[] };
 
 type AssistantDependencies = {
@@ -46,6 +48,8 @@ export async function runAssistant(
     patientId: string;
     mode: "patient" | "test";
     knowledgeMode?: "draft" | "published";
+    /** Interface language for the reply, e.g. "Arabic"; "auto" follows the patient. */
+    responseLanguage?: string;
     onEvent?: (event: AssistantEvent) => void;
   },
   dependencies: AssistantDependencies = defaultDependencies,
@@ -57,6 +61,7 @@ export async function runAssistant(
   const sources = new Map<string, KnowledgeHit>();
   const toolCalls: string[] = [];
   let suggestion: BookingSuggestion | undefined;
+  let cancellationSuggestion: CancellationSuggestion | undefined;
   let text = "";
   let knowledgeSearches = 0;
   let knowledgeHits = 0;
@@ -66,7 +71,7 @@ export async function runAssistant(
       model: GEMINI_MODEL,
       contents,
       config: {
-        systemInstruction: systemInstruction(today),
+        systemInstruction: systemInstruction(today, options.responseLanguage),
         ...(round < MAX_TOOL_ROUNDS
           ? { tools: [{ functionDeclarations }] }
           : {}),
@@ -118,6 +123,13 @@ export async function runAssistant(
         suggestion = result.suggestion;
         options.onEvent?.({ type: "suggestion", data: suggestion });
       }
+      if (result.cancellationSuggestion) {
+        cancellationSuggestion = result.cancellationSuggestion;
+        options.onEvent?.({
+          type: "cancel_suggestion",
+          data: cancellationSuggestion,
+        });
+      }
       responses.push({
         functionResponse: {
           name,
@@ -137,6 +149,7 @@ export async function runAssistant(
   return {
     text,
     suggestion,
+    cancellationSuggestion,
     sources: [...sources.values()],
     toolCalls,
     knowledgeSearches,

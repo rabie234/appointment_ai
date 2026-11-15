@@ -1,8 +1,18 @@
+
 "use client"
 
+import { useLanguage, type Language } from "@/components/i18n/language-provider"
+import { t } from "@/components/i18n/translations"
 import { useState, useTransition, useActionState, useEffect } from "react"
 import { useFormStatus } from "react-dom"
 import { cn } from "@/lib/utils"
+import {
+    DAYS,
+    intersectSchedules,
+    normalizeWeek,
+    slotsForDay,
+    type DayHours,
+} from "@/lib/schedule"
 import {
     Table,
     TableBody,
@@ -31,44 +41,75 @@ import {
     startAppointment,
     completeAppointment,
     cancelAppointment,
+    markAppointmentMissed,
     adminCreateAppointment,
     getDoctorSlots,
     type AppointmentActionState,
 } from "./actions"
 
-export type PatientOption = { id: string; name: string; email: string }
-export type DoctorOption = { id: string; name: string; specialty: string }
+export type PatientOption = {
+    id: string
+    name: string
+    email: string
+}
+
+export type DoctorOption = {
+    id: string
+    name: string
+    nameAr: string
+    specialty: string
+    specialtyAr: string
+    schedule: DayHours[]
+    leavePeriods: { start: string; end: string }[]
+}
 
 export type AdminAppointment = {
     id: string
     patient: string
     doctor: string
+    doctorNameAr: string
     specialty: string
+    specialtyAr: string
     date: string
-    /** Scheduled start and end of the slot, already formatted (e.g. "9:00 AM"). */
+    scheduledDate: string
+    scheduledTimePassed: boolean
     time: string
     endTime: string
-    status: "pending" | "confirmed" | "in-progress" | "completed" | "cancelled"
+    status:
+        | "pending"
+        | "confirmed"
+        | "in-progress"
+        | "completed"
+        | "cancelled"
+        | "missed"
     type: "video" | "in-person"
     price: string
-    /** Actual check-in / check-out times, once the admin marks them. */
     startedAt?: string
     completedAt?: string
 }
 
-const FILTERS = ["All", "pending", "confirmed", "in-progress", "completed", "cancelled"] as const
+const FILTERS = [
+    "All",
+    "pending",
+    "confirmed",
+    "in-progress",
+    "completed",
+    "cancelled",
+    "missed",
+] as const
+
 const STATUS_LABEL: Record<AdminAppointment["status"], string> = {
     pending: "Pending",
     confirmed: "Confirmed",
     "in-progress": "In progress",
     completed: "Completed",
     cancelled: "Cancelled",
+    missed: "missed",
 }
 
 function badgeVariant(status: AdminAppointment["status"]) {
     switch (status) {
         case "confirmed":
-            return "default" as const
         case "in-progress":
             return "default" as const
         case "pending":
@@ -76,138 +117,322 @@ function badgeVariant(status: AdminAppointment["status"]) {
         case "completed":
             return "success" as const
         case "cancelled":
+        case "missed":
             return "destructive" as const
     }
+}
+
+function formatAppointmentDate(date: string, language: Language) {
+    const dateOnly = date.slice(0, 10)
+    const parsed = new Date(`${dateOnly}T12:00:00Z`)
+
+    return parsed.toLocaleDateString(
+        language === "ar" ? "ar-LB" : "en-US",
+        {
+            year: "numeric",
+            month: "short",
+            day: "numeric",
+            timeZone: "UTC",
+        }
+    )
+}
+
+type AppointmentsTableProps = {
+    appointments: AdminAppointment[]
+    patients: PatientOption[]
+    doctors: DoctorOption[]
+    clinicHours: DayHours[]
+    initialSelectedAppointmentId?: string
+    initialStatus?: string
 }
 
 export function AppointmentsTable({
     appointments,
     patients,
     doctors,
-}: {
-    appointments: AdminAppointment[]
-    patients: PatientOption[]
-    doctors: DoctorOption[]
-}) {
-    const [filter, setFilter] = useState<(typeof FILTERS)[number]>("All")
+    clinicHours,
+    initialSelectedAppointmentId,
+    initialStatus,
+}: AppointmentsTableProps) {
+    const selectedAppointment = appointments.find(
+        (appointment) => appointment.id === initialSelectedAppointmentId
+    )
+
+    const [filterOverride, setFilterOverride] = useState<
+        (typeof FILTERS)[number] | null
+    >(() => {
+        if (initialStatus && FILTERS.some((item) => item === initialStatus)) {
+            return initialStatus as (typeof FILTERS)[number]
+        }
+
+        return null
+    })
+
+    // Use the selected appointment's status as the default filter
+    // when navigating from Global Search.
+    const filter =
+        filterOverride ?? selectedAppointment?.status ?? "All"
+
+    // Scroll to the selected appointment when arriving from Global Search.
+    useEffect(() => {
+        if (!initialSelectedAppointmentId) return
+
+        const timer = window.setTimeout(() => {
+            document
+                .getElementById(`appointment-${initialSelectedAppointmentId}`)
+                ?.scrollIntoView({
+                    behavior: "smooth",
+                    block: "center",
+                })
+        }, 100)
+
+        return () => window.clearTimeout(timer)
+    }, [initialSelectedAppointmentId, appointments])
+
     const [createOpen, setCreateOpen] = useState(false)
+    const { language } = useLanguage()
+    const isArabic = language === "ar"
 
-    const filtered = filter === "All" ? appointments : appointments.filter((a) => a.status === filter)
+    const filtered =
+        filter === "All"
+            ? appointments
+            : appointments.filter(
+                  (appointment) => appointment.status === filter
+              )
 
-    const counts = appointments.reduce<Record<string, number>>((acc, a) => {
-        acc[a.status] = (acc[a.status] ?? 0) + 1
-        return acc
-    }, {})
+    const counts = appointments.reduce<Record<string, number>>(
+        (acc, appointment) => {
+            acc[appointment.status] =
+                (acc[appointment.status] ?? 0) + 1
+            return acc
+        },
+        {}
+    )
 
     return (
-        <div className="space-y-8 animate-in fade-in duration-500">
-            <div className="flex flex-col md:flex-row md:items-center justify-between gap-6">
+        <div
+            dir={isArabic ? "rtl" : "ltr"}
+            className="w-full min-w-0 space-y-6 animate-in fade-in duration-500"
+        >
+            {/* Page heading */}
+            <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
                 <div>
-                    <h1 className="text-3xl font-bold tracking-tight">Appointments Management</h1>
-                    <p className="text-muted-foreground mt-1">Review, confirm, and cancel clinic appointments.</p>
+                    <h1 className="text-3xl font-bold tracking-tight">
+                        {t(language, "Appointments Management")}
+                    </h1>
+                    <p className="mt-1 text-sm text-muted-foreground">
+                        {t(
+                            language,
+                            "Review, confirm, and cancel clinic appointments."
+                        )}
+                    </p>
                 </div>
-                <Button className="shadow-lg shadow-blue-100 gap-2" onClick={() => setCreateOpen(true)}>
+
+                <Button
+                    className="shrink-0 gap-2 shadow-sm"
+                    onClick={() => setCreateOpen(true)}
+                >
                     <Plus className="h-4 w-4" />
-                    New Appointment
+                    {t(language, "New Appointment")}
                 </Button>
             </div>
 
-            {/* Status filter */}
+            {/* Status filters */}
             <div className="flex flex-wrap gap-2">
-                {FILTERS.map((f) => {
-                    const count = f === "All" ? appointments.length : counts[f] ?? 0
+                {FILTERS.map((item) => {
+                    const count =
+                        item === "All"
+                            ? appointments.length
+                            : counts[item] ?? 0
+
                     return (
                         <button
-                            key={f}
-                            onClick={() => setFilter(f)}
+                            key={item}
+                            type="button"
+                            onClick={() => setFilterOverride(item)}
                             className={cn(
-                                "px-4 py-2 rounded-lg text-sm font-medium transition-all border",
-                                filter === f
-                                    ? "bg-primary text-primary-foreground border-primary shadow-sm"
-                                    : "bg-card border-transparent text-muted-foreground hover:text-foreground"
+                                "inline-flex items-center gap-2 whitespace-nowrap rounded-lg border px-3 py-2 text-sm font-medium transition-colors",
+                                filter === item
+                                    ? "border-primary bg-primary text-primary-foreground shadow-sm"
+                                    : "border-transparent bg-card text-muted-foreground hover:bg-accent hover:text-foreground"
                             )}
                         >
-                            {f === "All" ? "All" : STATUS_LABEL[f]}
-                            <span className="ml-2 opacity-70">{count}</span>
+                            <span>
+                                {item === "All"
+                                    ? t(language, "All")
+                                    : t(language, STATUS_LABEL[item])}
+                            </span>
+                            <span className="text-xs opacity-75">
+                                {count}
+                            </span>
                         </button>
                     )
                 })}
             </div>
 
-            <div className="bg-card/60 backdrop-blur-sm rounded-2xl border shadow-sm overflow-hidden">
-                <Table>
+            {/* Appointments table */}
+            <div className="w-full overflow-x-auto rounded-xl border bg-card/60 shadow-sm">
+                <Table
+                    dir={isArabic ? "rtl" : "ltr"}
+                    className="w-full min-w-[760px] table-auto"
+                >
                     <TableHeader>
-                        <TableRow className="hover:bg-transparent border-muted/50 bg-muted/30">
-                            <TableHead className="pl-6">Patient</TableHead>
-                            <TableHead>Doctor</TableHead>
-                            <TableHead>Service</TableHead>
-                            <TableHead>Date &amp; Time</TableHead>
-                            <TableHead>Status</TableHead>
-                            <TableHead className="text-right pr-6">Quick Actions</TableHead>
+                        <TableRow className="border-muted/50 bg-muted/30 hover:bg-muted/30">
+                            <TableHead className="whitespace-nowrap px-4 py-4 text-start">
+                                {t(language, "Patient")}
+                            </TableHead>
+
+                            <TableHead className="whitespace-nowrap px-4 py-4 text-start">
+                                {t(language, "Doctor")}
+                            </TableHead>
+
+                            <TableHead className="whitespace-nowrap px-4 py-4 text-start">
+                                {t(language, "Service")}
+                            </TableHead>
+
+                            <TableHead className="whitespace-nowrap px-4 py-4 text-start">
+                                {t(language, "Date & Time")}
+                            </TableHead>
+
+                            <TableHead className="whitespace-nowrap px-4 py-4 text-center">
+                                {t(language, "Status")}
+                            </TableHead>
+
+                            <TableHead className="whitespace-nowrap px-4 py-4 text-center">
+                                {t(language, "Quick Actions")}
+                            </TableHead>
                         </TableRow>
                     </TableHeader>
+
                     <TableBody>
                         {filtered.length === 0 ? (
                             <TableRow>
-                                <TableCell colSpan={6} className="text-center py-12 text-muted-foreground">
+                                <TableCell
+                                    colSpan={6}
+                                    className="py-12 text-center text-muted-foreground"
+                                >
                                     {appointments.length === 0
-                                        ? "No appointments yet."
-                                        : "No appointments in this category."}
+                                        ? t(language, "No appointments yet.")
+                                        : t(
+                                              language,
+                                              "No appointments in this category."
+                                          )}
                                 </TableCell>
                             </TableRow>
                         ) : (
                             filtered.map((app) => (
-                                <TableRow key={app.id} className="group hover:bg-accent/40 transition-colors border-muted/30">
-                                    <TableCell className="pl-6 font-bold">{app.patient}</TableCell>
-                                    <TableCell>
+                                <TableRow
+                                    key={app.id}
+                                    id={`appointment-${app.id}`}
+                                    className={`border-muted/30 align-middle transition-colors hover:bg-accent/30 ${
+                                        app.id === initialSelectedAppointmentId
+                                            ? "bg-primary/10 ring-1 ring-inset ring-primary"
+                                            : ""
+                                    }`}
+                                >
+                                    {/* Patient */}
+                                    <TableCell className="px-4 py-4 text-start">
+                                        <span
+                                            className="block max-w-[180px] truncate text-sm font-semibold"
+                                            title={app.patient}
+                                        >
+                                            {app.patient}
+                                        </span>
+                                    </TableCell>
+
+                                    {/* Doctor and specialty */}
+                                    <TableCell className="px-4 py-4 text-start">
                                         <div className="flex items-center gap-2">
-                                            <div className="h-7 w-7 rounded-lg bg-muted flex items-center justify-center">
+                                            <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-muted">
                                                 <User className="h-4 w-4 text-muted-foreground" />
                                             </div>
-                                            <div className="leading-tight">
-                                                <span className="text-sm font-semibold block">{app.doctor}</span>
-                                                <span className="text-xs text-muted-foreground">{app.specialty}</span>
+
+                                            <div className="min-w-0 leading-tight">
+                                                <span className="block whitespace-nowrap text-sm font-semibold">
+                                                    {isArabic
+                                                        ? app.doctorNameAr || app.doctor
+                                                        : app.doctor}
+                                                </span>
+
+                                                <span className="mt-1 block max-w-[190px] text-xs text-muted-foreground">
+                                                    {isArabic
+                                                        ? app.specialtyAr || app.specialty
+                                                        : app.specialty}
+                                                </span>
                                             </div>
                                         </div>
                                     </TableCell>
-                                    <TableCell>
+
+                                    {/* Service */}
+                                    <TableCell className="px-4 py-4 text-start">
                                         {app.type === "video" ? (
-                                            <div className="flex items-center gap-1.5 text-blue-600 text-xs font-bold uppercase tracking-tighter">
-                                                <Video className="h-3.5 w-3.5" />
-                                                <span>Tele-health</span>
+                                            <div className="flex items-center gap-1.5 whitespace-nowrap text-xs font-semibold text-blue-600">
+                                                <Video className="h-3.5 w-3.5 shrink-0" />
+                                                <span>
+                                                    {t(language, "Tele-health")}
+                                                </span>
                                             </div>
                                         ) : (
-                                            <div className="flex items-center gap-1.5 text-orange-600 text-xs font-bold uppercase tracking-tighter">
-                                                <MapPin className="h-3.5 w-3.5" />
-                                                <span>In-Clinic</span>
+                                            <div className="flex items-center gap-1.5 whitespace-nowrap text-xs font-semibold text-orange-600">
+                                                <MapPin className="h-3.5 w-3.5 shrink-0" />
+                                                <span>
+                                                    {t(language, "In-Clinic")}
+                                                </span>
                                             </div>
                                         )}
                                     </TableCell>
-                                    <TableCell className="text-sm font-medium">
-                                        <div>
-                                            <span className="text-foreground">{app.date}</span>
-                                            <span className="text-muted-foreground ml-2">{app.time} – {app.endTime}</span>
+
+                                    {/* Date, scheduled time, arrival and departure */}
+                                    <TableCell className="px-4 py-4 text-start">
+                                        <div className="flex min-w-[150px] flex-col items-start gap-1">
+                                            <span className="whitespace-nowrap text-sm font-semibold text-foreground">
+                                                {formatAppointmentDate(
+                                                    app.scheduledDate,
+                                                    language
+                                                )}
+                                            </span>
+
+                                            <span
+                                                dir="ltr"
+                                                className="whitespace-nowrap text-sm text-muted-foreground"
+                                            >
+                                                {app.time} – {app.endTime}
+                                            </span>
+
+                                            {app.startedAt && (
+                                                <span className="flex items-center gap-1 text-[11px] text-muted-foreground">
+                                                    <LogIn className="h-3 w-3 shrink-0 text-blue-500" />
+                                                    <span>
+                                                        {t(language, "Arrived")}{" "}
+                                                        {app.startedAt}
+                                                    </span>
+                                                </span>
+                                            )}
+
+                                            {app.completedAt && (
+                                                <span className="flex items-center gap-1 text-[11px] text-muted-foreground">
+                                                    <LogOut className="h-3 w-3 shrink-0 text-emerald-600" />
+                                                    <span>
+                                                        {t(language, "Left")}{" "}
+                                                        {app.completedAt}
+                                                    </span>
+                                                </span>
+                                            )}
                                         </div>
-                                        {(app.startedAt || app.completedAt) && (
-                                            <div className="mt-1 flex flex-col gap-0.5 text-[11px] text-muted-foreground font-normal">
-                                                {app.startedAt && (
-                                                    <span className="flex items-center gap-1">
-                                                        <LogIn className="h-3 w-3 text-blue-500" /> Arrived {app.startedAt}
-                                                    </span>
-                                                )}
-                                                {app.completedAt && (
-                                                    <span className="flex items-center gap-1">
-                                                        <LogOut className="h-3 w-3 text-emerald-600" /> Left {app.completedAt}
-                                                    </span>
-                                                )}
-                                            </div>
-                                        )}
                                     </TableCell>
-                                    <TableCell>
-                                        <Badge variant={badgeVariant(app.status)}>{STATUS_LABEL[app.status]}</Badge>
+
+                                    {/* Status */}
+                                    <TableCell className="px-4 py-4 text-center">
+                                        <Badge variant={badgeVariant(app.status)}>
+                                            {t(language, STATUS_LABEL[app.status])}
+                                        </Badge>
                                     </TableCell>
-                                    <TableCell className="text-right pr-6">
-                                        <RowActions app={app} />
+
+                                    {/* Quick actions */}
+                                    <TableCell className="px-4 py-4 text-center">
+                                        <div className="flex justify-center">
+                                            <RowActions app={app} />
+                                        </div>
                                     </TableCell>
                                 </TableRow>
                             ))
@@ -220,6 +445,7 @@ export function AppointmentsTable({
                 <CreateDialog
                     patients={patients}
                     doctors={doctors}
+                    clinicHours={clinicHours}
                     onClose={() => setCreateOpen(false)}
                 />
             )}
@@ -227,89 +453,187 @@ export function AppointmentsTable({
     )
 }
 
-// ── New-appointment dialog ──────────────────────────────────────────────────
+// ── New appointment dialog ──────────────────────────────────────────────────
 
-function upcomingDays(count: number) {
+function upcomingDays(count: number, language: Language) {
     const out: { value: string; label: string }[] = []
     const today = new Date()
+
+    // Build date-only values using local calendar dates to avoid UTC day shifts.
     for (let i = 0; i < count; i++) {
-        const d = new Date(today)
-        d.setDate(today.getDate() + i)
+        const day = new Date(
+            today.getFullYear(),
+            today.getMonth(),
+            today.getDate() + i
+        )
+
+        const year = day.getFullYear()
+        const month = String(day.getMonth() + 1).padStart(2, "0")
+        const date = String(day.getDate()).padStart(2, "0")
+        const value = `${year}-${month}-${date}`
+
         out.push({
-            value: d.toISOString().slice(0, 10),
-            label: d.toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" }),
+            value,
+            label: day.toLocaleDateString(
+                language === "ar" ? "ar-LB" : "en-US",
+                {
+                    weekday: "short",
+                    month: "short",
+                    day: "numeric",
+                }
+            ),
         })
     }
+
     return out
 }
 
-function pretty(time: string): string {
-    const [h, m] = time.split(":").map(Number)
-    const period = h >= 12 ? "PM" : "AM"
-    const hour12 = h % 12 === 0 ? 12 : h % 12
-    return `${hour12}:${String(m).padStart(2, "0")} ${period}`
+function pretty(time: string, language: Language): string {
+    const [hours, minutes] = time.split(":").map(Number)
+
+    if (Number.isNaN(hours) || Number.isNaN(minutes)) return time
+
+    const date = new Date()
+    date.setHours(hours, minutes, 0, 0)
+
+    return date.toLocaleTimeString(
+        language === "ar" ? "ar-LB" : "en-US",
+        {
+            hour: "numeric",
+            minute: "2-digit",
+            hour12: true,
+        }
+    )
 }
 
 function CreateDialog({
     patients,
     doctors,
+    clinicHours,
     onClose,
 }: {
     patients: PatientOption[]
     doctors: DoctorOption[]
+    clinicHours: DayHours[]
     onClose: () => void
 }) {
-    const days = upcomingDays(14)
+    const { language } = useLanguage()
+    const isArabic = language === "ar"
+    const days = upcomingDays(14, language)
+
     const [patientId, setPatientId] = useState("")
     const [doctorId, setDoctorId] = useState("")
     const [date, setDate] = useState(days[0].value)
     const [time, setTime] = useState("")
     const [type, setType] = useState<"in-person" | "video">("in-person")
-
     const [slots, setSlots] = useState<string[]>([])
     const [loadingSlots, startLoadingSlots] = useTransition()
 
-    const [state, formAction] = useActionState<AppointmentActionState, FormData>(
-        adminCreateAppointment,
-        {}
-    )
+    const selectedDoctor = doctors.find((doctor) => doctor.id === doctorId)
+    const scheduleForDates = selectedDoctor
+        ? intersectSchedules(
+              normalizeWeek(selectedDoctor.schedule),
+              clinicHours,
+          )
+        : clinicHours
+    const availableDays = days.filter((day) => {
+        const dateValue = new Date(`${day.value}T00:00:00.000Z`)
+        const weekday = DAYS[(dateValue.getUTCDay() + 6) % 7]
+        const doctorOnLeave = selectedDoctor?.leavePeriods.some(
+            (period) => day.value >= period.start && day.value < period.end,
+        )
+        if (doctorOnLeave) return false
+        const scheduleDay = scheduleForDates.find(
+            (entry) => entry.day === weekday,
+        )
 
-    // Fetch free slots whenever a doctor is selected or the date changes. The
-    // doctor `<select>` has no re-selectable empty option, so once set it stays
-    // set — no need to clear slots back to [] here.
+        return Boolean(
+            scheduleDay &&
+                !scheduleDay.closed &&
+                slotsForDay(scheduleDay).length > 0,
+        )
+    })
+    const hasSelectedDate = availableDays.some((day) => day.value === date)
+    const firstAvailableDate = availableDays[0]?.value ?? ""
+
+    const [state, formAction] = useActionState<
+        AppointmentActionState,
+        FormData
+    >(adminCreateAppointment, {})
+
+    // Load available slots when the selected doctor or date changes.
     useEffect(() => {
-        if (!doctorId) return
+        if (!doctorId || !date) {
+            setSlots([])
+            return
+        }
+
+        let cancelled = false
+
         startLoadingSlots(async () => {
-            const res = await getDoctorSlots(doctorId, date)
-            setSlots(res.slots ?? [])
+           const result = await getDoctorSlots(
+    doctorId,
+    date,
+    patientId || undefined,
+)
+
+            if (!cancelled) {
+                setSlots(result.slots ?? [])
+            }
         })
-    }, [doctorId, date])
+
+        return () => {
+            cancelled = true
+        }
+    }, [doctorId, date, patientId])
 
     useEffect(() => {
-        if (state.success) onClose()
+        if (!hasSelectedDate) {
+            setTime("")
+            setSlots([])
+            setDate(firstAvailableDate)
+        }
+    }, [hasSelectedDate, firstAvailableDate])
+
+    useEffect(() => {
+        if (state.success) {
+            onClose()
+        }
     }, [state.success, onClose])
 
     function pickDoctor(value: string) {
         setTime("")
+        setSlots([])
         setDoctorId(value)
     }
+
     function pickDate(value: string) {
         setTime("")
+        setSlots([])
         setDate(value)
     }
 
     return (
         <div
-            className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4 animate-in fade-in duration-200"
+            dir={isArabic ? "rtl" : "ltr"}
+            className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4 backdrop-blur-sm animate-in fade-in duration-200"
             onClick={onClose}
         >
             <div
-                className="w-full max-w-lg rounded-2xl border bg-card shadow-xl animate-in zoom-in-95 duration-200 max-h-[90vh] overflow-y-auto"
-                onClick={(e) => e.stopPropagation()}
+                className="max-h-[90vh] w-full max-w-lg overflow-y-auto rounded-2xl border bg-card shadow-xl animate-in zoom-in-95 duration-200"
+                onClick={(event) => event.stopPropagation()}
             >
                 <div className="flex items-center justify-between border-b p-5">
-                    <h2 className="text-lg font-bold">New Appointment</h2>
-                    <button onClick={onClose} className="text-muted-foreground hover:text-foreground">
+                    <h2 className="text-lg font-bold">
+                        {t(language, "New Appointment")}
+                    </h2>
+
+                    <button
+                        type="button"
+                        onClick={onClose}
+                        className="text-muted-foreground hover:text-foreground"
+                        aria-label={t(language, "Cancel")}
+                    >
                         <X className="h-5 w-5" />
                     </button>
                 </div>
@@ -319,97 +643,146 @@ function CreateDialog({
                     <input type="hidden" name="time" value={time} />
                     <input type="hidden" name="type" value={type} />
 
+                    {/* Patient */}
                     <label className="block space-y-1.5">
-                        <span className="text-sm font-medium">Patient</span>
+                        <span className="text-sm font-medium">
+                            {t(language, "Patient")}
+                        </span>
+
                         <select
                             name="patientId"
                             value={patientId}
-                            onChange={(e) => setPatientId(e.target.value)}
+                            onChange={(event) => setPatientId(event.target.value)}
                             required
                             className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                         >
-                            <option value="" disabled>Select a patient</option>
-                            {patients.map((p) => (
-                                <option key={p.id} value={p.id}>
-                                    {p.name} — {p.email}
+                            <option value="" disabled>
+                                {t(language, "Select a patient")}
+                            </option>
+
+                            {patients.map((patient) => (
+                                <option key={patient.id} value={patient.id}>
+                                    {patient.name} — {patient.email}
                                 </option>
                             ))}
                         </select>
                     </label>
 
+                    {/* Doctor */}
                     <label className="block space-y-1.5">
-                        <span className="text-sm font-medium">Doctor</span>
+                        <span className="text-sm font-medium">
+                            {t(language, "Doctor")}
+                        </span>
+
                         <select
                             name="doctorId"
                             value={doctorId}
-                            onChange={(e) => pickDoctor(e.target.value)}
+                            onChange={(event) => pickDoctor(event.target.value)}
                             required
                             className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                         >
-                            <option value="" disabled>Select a doctor</option>
-                            {doctors.map((d) => (
-                                <option key={d.id} value={d.id}>
-                                    {d.name} — {d.specialty}
+                            <option value="" disabled>
+                                {t(language, "Select a doctor")}
+                            </option>
+
+                            {doctors.map((doctor) => (
+                                <option key={doctor.id} value={doctor.id}>
+                                    {isArabic && doctor.nameAr
+                                        ? doctor.nameAr
+                                        : doctor.name}
+                                    {" — "}
+                                    {isArabic
+                                        ? doctor.specialtyAr ||
+                                          t(language, doctor.specialty)
+                                        : doctor.specialty}
                                 </option>
                             ))}
                         </select>
                     </label>
 
-                    <div className="grid grid-cols-2 gap-4">
+                    {/* Date and visit type */}
+                    <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
                         <label className="block space-y-1.5">
-                            <span className="text-sm font-medium">Date</span>
+                            <span className="text-sm font-medium">
+                                {t(language, "Date")}
+                            </span>
+
                             <select
                                 value={date}
-                                onChange={(e) => pickDate(e.target.value)}
+                                onChange={(event) => pickDate(event.target.value)}
                                 className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                             >
-                                {days.map((d) => (
-                                    <option key={d.value} value={d.value}>{d.label}</option>
+                                {availableDays.length === 0 ? (
+                                    <option value="">
+                                        {t(language, "No working days available.")}
+                                    </option>
+                                ) : availableDays.map((day) => (
+                                    <option key={day.value} value={day.value}>
+                                        {day.label}
+                                    </option>
                                 ))}
                             </select>
                         </label>
+
                         <label className="block space-y-1.5">
-                            <span className="text-sm font-medium">Visit Type</span>
+                            <span className="text-sm font-medium">
+                                {t(language, "Visit Type")}
+                            </span>
+
                             <select
                                 value={type}
-                                onChange={(e) => setType(e.target.value as "in-person" | "video")}
+                                onChange={(event) =>
+                                    setType(
+                                        event.target.value as "in-person" | "video"
+                                    )
+                                }
                                 className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                             >
-                                <option value="in-person">In-Person</option>
-                                <option value="video">Video Call</option>
+                                <option value="in-person">
+                                    {t(language, "In-Person")}
+                                </option>
+                                <option value="video">
+                                    {t(language, "Video Call")}
+                                </option>
                             </select>
                         </label>
                     </div>
 
+                    {/* Available slots */}
                     <div className="space-y-2">
-                        <span className="text-sm font-medium">Time Slot</span>
+                        <span className="text-sm font-medium">
+                            {t(language, "Time Slot")}
+                        </span>
+
                         {!doctorId ? (
-                            <p className="text-sm text-muted-foreground py-4 text-center border rounded-lg">
-                                Select a doctor to see available times.
+                            <p className="rounded-lg border py-4 text-center text-sm text-muted-foreground">
+                                {t(language, "Select a doctor to see available times.")}
                             </p>
                         ) : loadingSlots ? (
                             <div className="flex items-center justify-center py-6 text-muted-foreground">
                                 <Loader2 className="h-5 w-5 animate-spin" />
                             </div>
                         ) : slots.length === 0 ? (
-                            <p className="text-sm text-muted-foreground py-4 text-center border rounded-lg">
-                                No available slots on this day.
+                            <p className="rounded-lg border py-4 text-center text-sm text-muted-foreground">
+                                {t(language, "No available slots on this day.")}
                             </p>
                         ) : (
-                            <div className="grid grid-cols-4 gap-2">
-                                {slots.map((s) => (
+                            <div className="grid grid-cols-3 gap-2 sm:grid-cols-4">
+                                {slots.map((slot) => (
                                     <button
                                         type="button"
-                                        key={s}
-                                        onClick={() => setTime(s)}
+                                        key={slot}
+                                        onClick={() => setTime(slot)}
                                         className={cn(
-                                            "px-2 py-2 text-xs rounded-lg border transition-all",
-                                            time === s
-                                                ? "bg-primary text-primary-foreground border-primary"
+                                            "rounded-lg border px-2 py-2 text-xs transition-colors",
+                                            time === slot
+                                                ? "border-primary bg-primary text-primary-foreground"
                                                 : "hover:border-primary hover:text-primary"
                                         )}
                                     >
-                                        {pretty(s)}
+                                        <span dir="ltr">
+                                            {pretty(slot, language)}
+                                        </span>
                                     </button>
                                 ))}
                             </div>
@@ -423,8 +796,17 @@ function CreateDialog({
                     )}
 
                     <div className="flex justify-end gap-3 pt-2">
-                        <Button type="button" variant="outline" onClick={onClose}>Cancel</Button>
-                        <CreateSubmit disabled={!patientId || !doctorId || !time} />
+                        <Button
+                            type="button"
+                            variant="outline"
+                            onClick={onClose}
+                        >
+                            {t(language, "Cancel")}
+                        </Button>
+
+                        <CreateSubmit
+                            disabled={!patientId || !doctorId || !time}
+                        />
                     </div>
                 </form>
             </div>
@@ -434,85 +816,208 @@ function CreateDialog({
 
 function CreateSubmit({ disabled }: { disabled: boolean }) {
     const { pending } = useFormStatus()
+    const { language } = useLanguage()
+
     return (
-        <Button type="submit" disabled={disabled || pending} className="gap-2 shadow-lg shadow-blue-200">
+        <Button
+            type="submit"
+            disabled={disabled || pending}
+            className="gap-2 shadow-sm"
+        >
             {pending && <Loader2 className="h-4 w-4 animate-spin" />}
-            Create Appointment
+            {t(language, "Create Appointment")}
         </Button>
     )
 }
 
+// ── Appointment actions ─────────────────────────────────────────────────────
+
 function RowActions({ app }: { app: AdminAppointment }) {
+    const { language } = useLanguage()
+    const isArabic = language === "ar"
     const [pending, startTransition] = useTransition()
+    const [showCancelForm, setShowCancelForm] = useState(false)
+    const [cancellationReason, setCancellationReason] = useState("")
 
-    // Visit lifecycle: pending → confirmed → in-progress → completed.
-    const canConfirm = app.status === "pending"
-    const canStart = app.status === "pending" || app.status === "confirmed"
+    const canConfirm = app.status === "pending" && !app.scheduledTimePassed
+
+    const canStart = app.status === "confirmed"
+
     const canComplete = app.status === "in-progress"
-    const canCancel = app.status === "pending" || app.status === "confirmed"
 
-    if (!canConfirm && !canStart && !canComplete && !canCancel) {
+    const canCancel =
+        app.status === "pending" || app.status === "confirmed"
+
+    const canMarkMissed =
+        app.status === "confirmed" && app.scheduledTimePassed
+
+    if (
+        !canConfirm &&
+        !canStart &&
+        !canComplete &&
+        !canCancel &&
+        !canMarkMissed
+    ) {
         return <span className="text-xs text-muted-foreground">—</span>
     }
 
-    function run(fn: () => Promise<{ error?: string }>, confirmMsg?: string) {
-        if (confirmMsg && !window.confirm(confirmMsg)) return
+    function run(
+        action: () => Promise<{ error?: string; success?: boolean }>,
+        confirmMessage?: string
+    ) {
+        if (confirmMessage && !window.confirm(confirmMessage)) return
+
         startTransition(async () => {
-            const res = await fn()
-            if (res?.error) window.alert(res.error)
+            const result = await action()
+
+            if (result?.error) {
+                window.alert(result.error)
+            }
         })
     }
 
     return (
-        <div className="flex justify-end gap-1.5">
-            {pending && <Loader2 className="h-4 w-4 animate-spin text-muted-foreground self-center" />}
+        <div
+            dir={isArabic ? "rtl" : "ltr"}
+            className="flex flex-wrap items-center justify-center gap-1.5"
+        >
+            {pending && (
+                <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
+            )}
 
             {canConfirm && (
                 <Button
+                    type="button"
                     variant="outline"
                     size="icon"
                     disabled={pending}
                     onClick={() => run(() => confirmAppointment(app.id))}
-                    title="Confirm"
-                    className="h-8 w-8 text-blue-600 border-blue-100 hover:bg-blue-50"
+                    title={t(language, "Confirm")}
+                    className="h-8 w-8 border-blue-100 text-blue-600 hover:bg-blue-50"
                 >
                     <Check className="h-4 w-4" />
                 </Button>
             )}
+
             {canStart && (
                 <Button
+                    type="button"
                     variant="outline"
                     size="icon"
                     disabled={pending}
                     onClick={() => run(() => startAppointment(app.id))}
-                    title="Start visit (patient arrived)"
-                    className="h-8 w-8 text-indigo-600 border-indigo-100 hover:bg-indigo-50"
+                    title={t(language, "Start visit (patient arrived)")}
+                    className="h-8 w-8 border-indigo-100 text-indigo-600 hover:bg-indigo-50"
                 >
                     <PlayCircle className="h-4 w-4" />
                 </Button>
             )}
+
             {canComplete && (
                 <Button
+                    type="button"
                     variant="outline"
                     size="icon"
                     disabled={pending}
                     onClick={() => run(() => completeAppointment(app.id))}
-                    title="Complete visit (patient left)"
-                    className="h-8 w-8 text-emerald-600 border-emerald-100 hover:bg-emerald-50"
+                    title={t(language, "Complete visit (patient left)")}
+                    className="h-8 w-8 border-emerald-100 text-emerald-600 hover:bg-emerald-50"
                 >
                     <CheckCheck className="h-4 w-4" />
                 </Button>
             )}
+
             {canCancel && (
+                <>
+                    <Button
+                        type="button"
+                        variant="outline"
+                        size="icon"
+                        disabled={pending}
+                        onClick={() =>
+                            setShowCancelForm((previous) => !previous)
+                        }
+                        title={t(language, "Cancel")}
+                        className="h-8 w-8 border-red-100 text-destructive hover:bg-red-50"
+                    >
+                        <X className="h-4 w-4" />
+                    </Button>
+
+                    {showCancelForm && (
+                        <div className="absolute z-20 mt-2 flex min-w-64 flex-col gap-2 rounded-lg border bg-card p-3 text-start shadow-lg">
+                            <label className="text-sm font-medium">
+                                {t(language, "Cancellation Comment (Optional)")}
+                            </label>
+
+                            <textarea
+                                value={cancellationReason}
+                                onChange={(event) =>
+                                    setCancellationReason(event.target.value)
+                                }
+                                placeholder={t(
+                                    language,
+                                    "Enter the reason for cancellation..."
+                                )}
+                                rows={3}
+                                className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+                            />
+
+                            <div className="flex flex-wrap gap-2">
+                                <Button
+                                    type="button"
+                                    size="sm"
+                                    variant="outline"
+                                    disabled={pending}
+                                    onClick={() => setShowCancelForm(false)}
+                                >
+                                    {t(language, "Back")}
+                                </Button>
+
+                                <Button
+                                    type="button"
+                                    size="sm"
+                                    variant="destructive"
+                                    disabled={pending}
+                                    onClick={() =>
+                                        run(
+                                            () =>
+                                                cancelAppointment(
+                                                    app.id,
+                                                    cancellationReason
+                                                ),
+                                            t(
+                                                language,
+                                                "Confirm cancellation for this appointment?"
+                                            )
+                                        )
+                                    }
+                                >
+                                    {t(language, "Confirm Cancellation")}
+                                </Button>
+                            </div>
+                        </div>
+                    )}
+                </>
+            )}
+
+            {canMarkMissed && (
                 <Button
+                    type="button"
                     variant="outline"
-                    size="icon"
+                    size="sm"
                     disabled={pending}
-                    onClick={() => run(() => cancelAppointment(app.id), `Cancel ${app.patient}'s appointment with ${app.doctor}?`)}
-                    title="Cancel"
-                    className="h-8 w-8 text-destructive border-red-100 hover:bg-red-50"
+                    onClick={() =>
+                        run(
+                            () => markAppointmentMissed(app.id),
+                            t(
+                                language,
+                                "Confirm that this patient did not attend the appointment?"
+                            )
+                        )
+                    }
+                    title={t(language, "Mark as missed")}
                 >
-                    <X className="h-4 w-4" />
+                    {t(language, "Mark Missed")}
                 </Button>
             )}
         </div>

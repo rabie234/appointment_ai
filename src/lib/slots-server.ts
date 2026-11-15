@@ -1,8 +1,30 @@
 import connectDB from '@/lib/mongodb';
-import { availableSlots, normalizeWeek, type DayHours } from '@/lib/schedule';
+import { availableSlots, normalizeWeek,  type DayHours } from '@/lib/schedule';
 import Doctor from '@/models/Doctor';
 import Appointment from '@/models/Appointment';
+import DoctorLeave from "@/models/DoctorLeave"
+import { getClinicHours } from '@/lib/clinic-hours';
+import { intersectSchedules } from '@/lib/schedule';
 
+export const CLINIC_TIME_ZONE = 'Asia/Beirut';
+
+/** Compare a clinic-local calendar date and time with the current instant. */
+export function isPastClinicSlot(date: string, time: string, now = new Date()): boolean {
+  const parts = new Intl.DateTimeFormat('en-CA', {
+    timeZone: CLINIC_TIME_ZONE,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    hourCycle: 'h23',
+  }).formatToParts(now);
+  const values = Object.fromEntries(parts.map(({ type, value }) => [type, value]));
+  const today = `${values.year}-${values.month}-${values.day}`;
+  const currentTime = `${values.hour}:${values.minute}`;
+
+  return date < today || (date === today && time <= currentTime);
+}
 /**
  * Server-side slot helpers shared by the patient booking flow, the admin
  * appointment creator, and the AI assistant tools — so the "what's free?" logic
@@ -57,8 +79,33 @@ export async function freeSlotsFor(
   const doctor = await Doctor.findById(doctorId).select('schedule status').lean();
   if (!doctor) return { error: 'Doctor not found' };
   if (doctor.status !== 'active') return { slots: [] };
+  const { start, end } = dayBounds(date)
 
-  const schedule: DayHours[] = normalizeWeek(doctor.schedule);
-  const taken = await bookedTimes(doctorId, date);
-  return { slots: availableSlots(schedule, date, taken) };
+const leave = await DoctorLeave.exists({
+  doctor: doctorId,
+  startDate: { $lt: end },
+  endDate: { $gt: start },
+  $or: [
+    { status: "approved" },
+    // Older Admin-created leaves have no status field.
+    { status: { $exists: false } },
+  ],
+})
+
+if (leave) return { slots: [] }
+ const doctorSchedule: DayHours[] = normalizeWeek(doctor.schedule);
+const clinicSchedule = await getClinicHours();
+
+const effectiveSchedule = intersectSchedules(
+  doctorSchedule,
+  clinicSchedule
+);
+
+const taken = await bookedTimes(doctorId, date);
+
+return {
+  slots: availableSlots(effectiveSchedule, date, taken).filter(
+    (time) => !isPastClinicSlot(dateStr, time),
+  ),
+};
 }
