@@ -209,38 +209,62 @@ export async function POST(req: NextRequest) {
           );
           send({ type: "delta", text });
         } else {
-          const result = await runAssistant({
-            message,
-            history,
-            patientId,
-            mode: "patient",
-            responseLanguage,
-            onEvent: (event) => {
-              if (event.type === "sources") {
-                send({
-                  type: "sources",
-                  data: event.data.map((hit) => ({
-                    id: hit.id,
-                    title: hit.question,
-                    source: hit.source,
-                    revision: hit.revision,
-                  })),
-                });
-              } else {
-                send(event);
-              }
-            },
-          });
-          text = result.text;
-          suggestion = result.suggestion;
-          sources = result.sources.map((hit) => ({
-            id: hit.id,
-            title: hit.question,
-            source: hit.source,
-            revision: hit.revision,
-          }));
-          knowledgeSearches = result.knowledgeSearches;
-          knowledgeHits = result.knowledgeHits;
+          const nearestSpecialty = isNearestAvailabilityRequest(message)
+            ? await resolveNearestSpecialty(message, history, patientId)
+            : null;
+
+          if (nearestSpecialty) {
+            failureStage = "nearest appointment search";
+            const nearest = await runTool(
+              "find_nearest_available_appointment",
+              { specialty: nearestSpecialty },
+              patientId,
+              { mode: "patient" },
+            );
+            suggestion = nearest.suggestion;
+            if (suggestion) send({ type: "suggestion", data: suggestion });
+            text = nearestAppointmentResponse(
+              nearest.result,
+              nearestSpecialty,
+              responseLanguage,
+              message,
+            );
+            send({ type: "delta", text });
+          } else {
+            failureStage = "AI response";
+            const result = await runAssistant({
+              message,
+              history,
+              patientId,
+              mode: "patient",
+              responseLanguage,
+              onEvent: (event) => {
+                if (event.type === "sources") {
+                  send({
+                    type: "sources",
+                    data: event.data.map((hit) => ({
+                      id: hit.id,
+                      title: hit.question,
+                      source: hit.source,
+                      revision: hit.revision,
+                    })),
+                  });
+                } else {
+                  send(event);
+                }
+              },
+            });
+            text = result.text;
+            suggestion = result.suggestion;
+            sources = result.sources.map((hit) => ({
+              id: hit.id,
+              title: hit.question,
+              source: hit.source,
+              revision: hit.revision,
+            }));
+            knowledgeSearches = result.knowledgeSearches;
+            knowledgeHits = result.knowledgeHits;
+          }
         }
         failureStage = "saving conversation";
         const saved = await persist({
@@ -364,4 +388,126 @@ function bookingAcknowledgementText(
   return arabic
     ? `الموعد المقترح مع ${suggestion.doctorName} بتاريخ ${dateLabel} الساعة ${time} لم يُحجز بعد. اضغط زر تأكيد الحجز على البطاقة أعلاه لإتمامه.`
     : `The proposed appointment with ${suggestion.doctorName} on ${dateLabel} at ${time} is not booked yet. Click Confirm booking on the card above to complete it.`;
+}
+
+function isNearestAvailabilityRequest(message: string): boolean {
+  return /\b(?:nearest|closest|earliest|soonest|next available)\b|أقرب|اقرب|أسرع موعد|اسرع موعد/i.test(
+    message,
+  );
+}
+
+async function resolveNearestSpecialty(
+  message: string,
+  history: ChatTurn[],
+  patientId: string,
+): Promise<string | null> {
+  const response = await runTool(
+    "list_specialties",
+    {},
+    patientId,
+    { mode: "patient" },
+  );
+  const result = response.result as { specialties?: string[] };
+  const specialties = result.specialties ?? [];
+  const recentTexts = [
+    message,
+    ...history.slice(-12).reverse().map((turn) => turn.text),
+  ];
+
+  for (const text of recentTexts) {
+    const normalizedText = normalizeSearchText(text);
+    const matches = specialties.filter((specialty) =>
+      specialtySearchTerms(specialty).some((term) =>
+        includesWholePhrase(normalizedText, term),
+      ),
+    );
+    if (matches.length === 1) return matches[0];
+  }
+
+  return null;
+}
+
+function specialtySearchTerms(specialty: string): string[] {
+  const normalized = normalizeSearchText(specialty);
+  const terms = [normalized];
+  if (normalized.endsWith("y")) {
+    const stem = normalized.slice(0, -1);
+    terms.push(`${stem}ist`, `${stem}ists`);
+  }
+  return terms.filter(Boolean);
+}
+
+function normalizeSearchText(value: string): string {
+  return value
+    .toLocaleLowerCase()
+    .normalize("NFKD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^a-z0-9\u0600-\u06ff]+/g, " ")
+    .trim();
+}
+
+function includesWholePhrase(text: string, phrase: string): boolean {
+  return (` ${text} `).includes(` ${phrase} `);
+}
+
+function nearestAppointmentResponse(
+  value: unknown,
+  specialty: string,
+  responseLanguage: string,
+  message: string,
+): string {
+  const arabic =
+    responseLanguage === "Arabic" ||
+    (responseLanguage === "auto" && /[\u0600-\u06ff]/.test(message));
+  const result =
+    value && typeof value === "object"
+      ? (value as {
+          found?: boolean;
+          error?: string;
+          appointment?: {
+            doctorName: string;
+            specialty: string;
+            date: string;
+            time: string;
+          };
+          existingAppointment?: {
+            doctorName: string;
+            specialty: string;
+            date: string;
+            time: string;
+          };
+        })
+      : {};
+
+  if (result.existingAppointment) {
+    const appointment = result.existingAppointment;
+    const date = formatProposalDate(appointment.date, arabic);
+    const time = formatTime12h(appointment.time, arabic ? "ar" : "en");
+    return arabic
+      ? `لديك موعد قائم مع ${appointment.doctorName} في ${appointment.specialty} بتاريخ ${date} الساعة ${time}. لا يمكنك حجز موعد آخر في الاختصاص نفسه قبل اكتماله أو إلغائه.`
+      : `You already have an active ${appointment.specialty} appointment with ${appointment.doctorName} on ${date} at ${time}. Complete or cancel it before booking another in this specialty.`;
+  }
+
+  if (result.found && result.appointment) {
+    const appointment = result.appointment;
+    const date = formatProposalDate(appointment.date, arabic);
+    const time = formatTime12h(appointment.time, arabic ? "ar" : "en");
+    return arabic
+      ? `أقرب موعد متاح في اختصاص ${specialty} مع ${appointment.doctorName} بتاريخ ${date} الساعة ${time}. أكّد الحجز من الزر أدناه.`
+      : `The nearest available ${specialty} appointment is with ${appointment.doctorName} on ${date} at ${time}. Use the Confirm booking button below.`;
+  }
+
+  return arabic
+    ? `لم أجد موعدًا متاحًا في اختصاص ${specialty} خلال السنة القادمة.`
+    : result.error ??
+        `No bookable appointments were found in ${specialty} during the next 12 months.`;
+}
+
+function formatProposalDate(dateString: string, arabic: boolean): string {
+  const date = new Date(`${dateString}T00:00:00.000Z`);
+  if (Number.isNaN(date.getTime())) return dateString;
+  return new Intl.DateTimeFormat(arabic ? "ar-LB" : "en-US", {
+    dateStyle: "long",
+    timeZone: "UTC",
+  }).format(date);
 }
