@@ -282,15 +282,15 @@ export function WorkingHoursManager({
             )}
             {showSavedScheduleOnly && (
                     <p className="rounded-md bg-emerald-50 px-4 py-3 text-sm text-emerald-800 dark:bg-emerald-900/20 dark:text-emerald-300">
-                        {t(language, "Patient slots follow the overlapping clinic and doctor hours. Clinic-closed days are marked off in your saved schedule.")}
+                        {t(language, "Your saved schedule fits within current clinic hours. Clinic-closed days stay Off, and clinic extensions do not automatically expand your schedule.")}
                     </p>
                 )}
             {(needsClinicHoursReview || hasClinicHoursConflict) && (
                 <div className="space-y-3 rounded-md border border-amber-300 bg-amber-50 p-4 text-sm text-amber-950 dark:border-amber-900 dark:bg-amber-950/30 dark:text-amber-100">
                     <p>
                         {hasClinicHoursConflict
-                            ? t(language, "Your saved schedule extends beyond the current clinic hours. Patient slots are limited to overlapping times. Reviewing does not change your saved schedule.")
-                            : t(language, "Clinic hours changed. Clinic-closed days are marked off in your saved schedule. Review the update.")}
+                            ? t(language, "Some saved doctor hours still exceed clinic hours. Reviewing this update will limit them to the overlapping hours; clinic extensions will not expand your schedule.")
+                            : t(language, "Clinic hours changed. Your saved schedule was adjusted to fit the clinic. Review the update.")}
                     </p>
                     {needsClinicHoursReview && (
                         <form action={acknowledgeClinicHours}>

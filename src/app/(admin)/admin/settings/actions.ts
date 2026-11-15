@@ -13,6 +13,8 @@ import {
   intervalsForDay,
   dayOfWeek,
   slotsForDay,
+  intersectSchedules,
+  normalizeWeek,
 } from '@/lib/schedule';
 import { notifyAppointmentParties, notifyUser } from '@/lib/notification-service';
 
@@ -80,43 +82,55 @@ export async function updateClinicHours(
       { upsert: true, new: true, setDefaultsOnInsert: true }
     );
 
-    // A clinic-closed weekday must also be marked off in every doctor's saved
-    // schedule. Keep each doctor's opening/closing times so an admin can
-    // restore them manually if the clinic later reopens that weekday.
-    const closedDays = week.filter((entry) => entry.closed).map((entry) => entry.day);
+    // Keep every saved doctor schedule within the current clinic hours.
+    // Intersecting trims shortened hours and closed days, but never expands a
+    // doctor's schedule when the clinic extends its hours.
+    const doctors = await Doctor.find({})
+      .select('_id user schedule')
+      .lean();
+    const adjustedDoctorUserIds = new Set<string>();
+    const scheduleUpdates = doctors.flatMap((doctor) => {
+      const savedSchedule = normalizeWeek(doctor.schedule);
+      const clinicBoundSchedule = intersectSchedules(savedSchedule, week);
+
+      if (JSON.stringify(savedSchedule) === JSON.stringify(clinicBoundSchedule)) {
+        return [];
+      }
+
+      if (doctor.user) adjustedDoctorUserIds.add(String(doctor.user));
+
+      return [
+        {
+          updateOne: {
+            filter: { _id: doctor._id },
+            update: { $set: { schedule: clinicBoundSchedule } },
+          },
+        },
+      ];
+    });
+
+    if (scheduleUpdates.length > 0) {
+      await Doctor.bulkWrite(scheduleUpdates);
+    }
+
+    const doctorUsersToNotify = clinicHoursChanged
+      ? doctors.flatMap((doctor) => (doctor.user ? [String(doctor.user)] : []))
+      : [...adjustedDoctorUserIds];
+
     await Promise.all(
-      closedDays.map((day) =>
-        Doctor.updateMany(
-          { 'schedule.day': day },
-          { $set: { 'schedule.$[closedDay].closed': true } },
-          { arrayFilters: [{ 'closedDay.day': day }] },
-        ),
+      [...new Set(doctorUsersToNotify)].map((userId) =>
+        notifyUser(userId, {
+          category: 'schedule',
+          titleKey: clinicHoursChanged
+            ? 'Notification: Clinic hours updated'
+            : 'Notification: Doctor schedule adjusted to clinic hours',
+          bodyKey: clinicHoursChanged
+            ? 'Notification body: The clinic updated its working hours. Your saved doctor schedule now fits within the clinic hours and will not expand automatically. Review the update on your Working Hours page.'
+            : 'Notification body: Your saved doctor schedule was adjusted to fit within the current clinic hours. Review the update on your Working Hours page.',
+          href: '/doctor/working-hours',
+        }),
       ),
     );
-
-    if (clinicHoursChanged) {
-      const doctors = await Doctor.find({
-        user: { $exists: true, $ne: null },
-      })
-        .select('user')
-        .lean();
-
-      await Promise.all(
-        doctors.flatMap((doctor) =>
-          doctor.user
-            ? [
-                notifyUser(String(doctor.user), {
-                  category: 'schedule',
-                  titleKey: 'Notification: Clinic hours updated',
-                  bodyKey:
-                    'Notification body: The clinic updated its working hours. Clinic-closed days are automatically marked off in your saved schedule. Review the update on your Working Hours page.',
-                  href: '/doctor/working-hours',
-                }),
-              ]
-            : []
-        )
-      );
-    }
 
     // Find active future appointments, including those
     // previously marked as affected.
@@ -140,14 +154,14 @@ export async function updateClinicHours(
       )),
     ];
 
-    const doctors = await Doctor.find({
+    const appointmentDoctors = await Doctor.find({
       _id: { $in: doctorIds },
     })
       .select('schedule')
       .lean();
 
     const doctorById = new Map(
-      doctors.map((doctor) => [String(doctor._id), doctor])
+      appointmentDoctors.map((doctor) => [String(doctor._id), doctor])
     );
 
     const tasks = appointments.map(async (appointment) => {

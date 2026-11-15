@@ -390,7 +390,7 @@ export default async function AdminReportsPage({
     const prev = summarize(previous)
 
     const visits = current.filter(
-        (appointment) => appointment.status !== "cancelled"
+        (appointment) => appointment.status !== "completed"
     )
 
     const kpis: {
