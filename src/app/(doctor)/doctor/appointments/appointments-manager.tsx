@@ -91,6 +91,10 @@ function reasonText(reason: string, language: "en" | "ar"): string {
         return t(language, "Cancelled by the patient via the AI assistant")
     }
 
+    if (reason === "Not confirmed before appointment time") {
+        return t(language, "Not confirmed before appointment time")
+    }
+
     return reason
 }
 

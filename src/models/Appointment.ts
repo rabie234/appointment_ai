@@ -22,6 +22,7 @@ export interface IAppointment extends Document {
     clinicHoursConflict?: boolean;
     startedAt?: Date
     completedAt?: Date
+    expiryNotificationSentAt?: Date
     createdAt: Date
     updatedAt: Date
 }
@@ -91,6 +92,9 @@ const AppointmentSchema = new Schema<IAppointment>(
             type: Date,
         },
         completedAt: {
+            type: Date,
+        },
+        expiryNotificationSentAt: {
             type: Date,
         },
     },

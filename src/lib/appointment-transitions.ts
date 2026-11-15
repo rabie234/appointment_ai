@@ -1,5 +1,6 @@
 import { isValidObjectId } from 'mongoose';
 import connectDB from '@/lib/mongodb';
+import { isPastClinicSlot } from '@/lib/slots-server';
 import Appointment, { type IAppointment } from '@/models/Appointment';
 
 export type Status = IAppointment['status'];
@@ -8,24 +9,20 @@ export type NextStatus = 'confirmed' | 'in-progress' | 'completed' | 'cancelled'
 /**
  * The statuses staff may set, and which current states each may come from.
  * Guards against nonsensical transitions (completing a visit that never
- * started, reviving a cancelled one). The visit lifecycle is
- * pending → confirmed → in-progress → completed, with cancel / missed
- * available until the visit starts.
+ * started, reviving a cancelled one, or marking an unconfirmed request missed).
+ * A pending request must be confirmed before its scheduled start time.
  */
 export const TRANSITIONS: Record<NextStatus, Status[]> = {
   confirmed: ['pending'],
-  'in-progress': ['pending', 'confirmed'],
+  'in-progress': ['confirmed'],
   completed: ['in-progress'],
   cancelled: ['pending', 'confirmed'],
-  missed: ['pending', 'confirmed'],
+  missed: ['confirmed'],
 };
 
-/** Whether the slot's start time is already in the past. */
+/** Keep the shared helper for schedule-request pages, using clinic-local time. */
 export function appointmentHasPassed(date: Date, time: string): boolean {
-  const start = new Date(date);
-  const [hours, minutes] = time.split(':').map(Number);
-  start.setHours(hours, minutes, 0, 0);
-  return start < new Date();
+  return isPastClinicSlot(date.toISOString().slice(0, 10), time);
 }
 
 /**
@@ -66,18 +63,50 @@ export async function applyTransition(options: {
   if (!TRANSITIONS[next].includes(appt.status)) {
     return { error: `Cannot move a ${appt.status} appointment to ${next}` };
   }
-  if (next === 'missed' && !appointmentHasPassed(appt.date, appt.time)) {
+  const scheduledDate = appt.date.toISOString().slice(0, 10);
+  const scheduledStartPassed = isPastClinicSlot(scheduledDate, appt.time);
+
+  if (next === 'confirmed' && scheduledStartPassed) {
+    return {
+      error: 'This request cannot be confirmed after its scheduled time.',
+    };
+  }
+  if (next === 'missed' && !scheduledStartPassed) {
     return { error: 'This appointment time has not passed yet.' };
   }
 
   try {
-    appt.status = next;
-    if (next === 'in-progress') appt.startedAt = new Date();
-    if (next === 'completed') appt.completedAt = new Date();
+    const set: Record<string, unknown> = { status: next };
+    const unset: Record<string, ""> = {};
+
+    if (next === 'in-progress') set.startedAt = new Date();
+    if (next === 'completed') set.completedAt = new Date();
     if (next === 'cancelled') {
-      appt.cancellationReason = cancellationReason?.trim() || undefined;
+      const reason = cancellationReason?.trim();
+      if (reason) set.cancellationReason = reason;
+      else unset.cancellationReason = "";
     }
-    await appt.save();
+
+    const updated = await Appointment.findOneAndUpdate(
+      {
+        _id: id,
+        ...(doctorId ? { doctor: doctorId } : {}),
+        status: appt.status,
+        date: appt.date,
+        time: appt.time,
+      },
+      {
+        $set: set,
+        ...(Object.keys(unset).length ? { $unset: unset } : {}),
+      },
+      { new: true, runValidators: true },
+    );
+
+    if (!updated) {
+      return {
+        error: 'This appointment changed while it was being updated. Refresh and try again.',
+      };
+    }
   } catch (error) {
     console.error(`Set appointment ${next} failed:`, error);
     return {

@@ -8,6 +8,7 @@ import Doctor from "@/models/Doctor"
 import DoctorLeave from "@/models/DoctorLeave"
 import User from "@/models/User"
 import Specialty from "@/models/Specialty"
+import { isPastClinicSlot } from "@/lib/slots-server"
 import {
     AppointmentsTable,
     type AdminAppointment,
@@ -151,6 +152,10 @@ export default async function AdminAppointmentsPage({
             return {
                 id: String(appointment._id),
                 scheduledDate: `${new Date(appointment.date).toISOString().slice(0, 10)}T${appointment.time}:00`,
+                scheduledTimePassed: isPastClinicSlot(
+                    new Date(appointment.date).toISOString().slice(0, 10),
+                    appointment.time,
+                ),
                 patient: appointment.patient?.name ?? "Unknown patient",
                 doctor: doctor?.name ?? "Unknown doctor",
                 doctorNameAr: doctor?.nameAr?.trim() || "",

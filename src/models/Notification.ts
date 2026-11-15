@@ -13,6 +13,7 @@ export interface INotification extends Document {
     bodyKey: string
     href: string
     context?: string
+    eventKey?: string
     readAt?: Date
     createdAt: Date
     updatedAt: Date
@@ -51,6 +52,11 @@ const NotificationSchema = new Schema<INotification>(
             trim: true,
             maxlength: 240,
         },
+        eventKey: {
+            type: String,
+            trim: true,
+            maxlength: 180,
+        },
         readAt: {
             type: Date,
             default: null,
@@ -60,6 +66,7 @@ const NotificationSchema = new Schema<INotification>(
 )
 
 NotificationSchema.index({ recipient: 1, readAt: 1, createdAt: -1 })
+NotificationSchema.index({ eventKey: 1 }, { unique: true, sparse: true })
 
 const Notification: Model<INotification> =
     mongoose.models.Notification ||

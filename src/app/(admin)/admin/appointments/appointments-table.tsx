@@ -72,6 +72,7 @@ export type AdminAppointment = {
     specialtyAr: string
     date: string
     scheduledDate: string
+    scheduledTimePassed: boolean
     time: string
     endTime: string
     status:
@@ -834,10 +835,9 @@ function RowActions({ app }: { app: AdminAppointment }) {
     const [showCancelForm, setShowCancelForm] = useState(false)
     const [cancellationReason, setCancellationReason] = useState("")
 
-    const canConfirm = app.status === "pending"
+    const canConfirm = app.status === "pending" && !app.scheduledTimePassed
 
-    const canStart =
-        app.status === "pending" || app.status === "confirmed"
+    const canStart = app.status === "confirmed"
 
     const canComplete = app.status === "in-progress"
 
@@ -845,8 +845,7 @@ function RowActions({ app }: { app: AdminAppointment }) {
         app.status === "pending" || app.status === "confirmed"
 
     const canMarkMissed =
-        (app.status === "pending" || app.status === "confirmed") &&
-        new Date(app.scheduledDate) < new Date()
+        app.status === "confirmed" && app.scheduledTimePassed
 
     if (
         !canConfirm &&

@@ -462,6 +462,12 @@ export function AppointmentsList({
                                                                   ? isArabic
                                                                       ? "تم إلغاء الموعد عبر المساعد الذكي"
                                                                       : "Cancelled by AI assistant"
+                                                                  : app.cancellationReason ===
+                                                                      "Not confirmed before appointment time"
+                                                                    ? t(
+                                                                        language,
+                                                                        "Not confirmed before appointment time",
+                                                                      )
                                                                   : app.cancellationReason}
                                                         </p>
                                                     )}
