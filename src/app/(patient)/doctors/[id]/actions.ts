@@ -18,6 +18,7 @@ import { parseCalendarDate as parseDay } from "@/lib/date-validation";
 import mongoose from "mongoose";
 import DoctorScheduleRequest from "@/models/DoctorScheduleRequest";
 import {
+  createAppointmentWithPatientConflictGuard,
   findActiveAppointmentInSpecialty,
   findPatientTimeConflict,
   type ActiveSpecialtyAppointment,
@@ -341,21 +342,8 @@ export async function bookAppointment(
     };
   }
 
-  // Recheck immediately before creating the appointment.
-  const latestTimeConflict = await findPatientTimeConflict(
-    session.user.id,
-    date,
-    time
-  );
-
-  if (latestTimeConflict) {
-    return {
-      error: `You already have an active appointment with Dr. ${latestTimeConflict.doctorName} on ${latestTimeConflict.date} at ${latestTimeConflict.time}. Choose a different time.`,
-    };
-  }
-
   try {
-    await Appointment.create({
+    const guarded = await createAppointmentWithPatientConflictGuard({
       patient: session.user.id,
       doctor: doctorId,
       date,
@@ -364,6 +352,20 @@ export async function bookAppointment(
       status: "pending",
       price: CONSULTATION_FEE,
     });
+
+    if (guarded.specialtyConflict) {
+      return {
+        error:
+          `You already have an active ${guarded.specialtyConflict.specialty} appointment with Dr. ${guarded.specialtyConflict.doctorName} ` +
+          `on ${guarded.specialtyConflict.date} at ${guarded.specialtyConflict.time}. Complete or cancel it before booking another in this specialty.`,
+      };
+    }
+
+    if (guarded.conflict) {
+      return {
+        error: `You already have an active appointment with Dr. ${guarded.conflict.doctorName} on ${guarded.conflict.date} at ${guarded.conflict.time}. Choose a different time.`,
+      };
+    }
   } catch (error: unknown) {
     if (
       typeof error === "object" &&

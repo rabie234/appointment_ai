@@ -25,6 +25,7 @@ import { randomUUID } from "node:crypto";
 import { searchKnowledge } from "@/lib/knowledge-server";
 import {
   bookingIsAuthorized,
+  createAppointmentWithPatientConflictGuard,
   findActiveAppointmentInSpecialty,
   findPatientTimeConflict,
   type ToolContext,
@@ -796,24 +797,8 @@ async function confirmBooking(
     };
   }
 
-  // Recheck once more immediately before insert.
-  const latestTimeConflict = await findPatientTimeConflict(
-    patientId,
-    day,
-    time
-  );
-
-  if (latestTimeConflict) {
-    return {
-      booked: false,
-      reason:
-        `You already have an active appointment with Dr. ${latestTimeConflict.doctorName} ` +
-        `on ${latestTimeConflict.date} at ${latestTimeConflict.time}. Choose a different time.`,
-    };
-  }
-
   try {
-    const appt = await Appointment.create({
+    const guarded = await createAppointmentWithPatientConflictGuard({
       patient: patientId,
       doctor: doctorId,
       date: day,
@@ -822,6 +807,27 @@ async function confirmBooking(
       status: "pending",
       price: CONSULTATION_FEE,
     });
+
+    if (guarded.specialtyConflict) {
+      return {
+        booked: false,
+        reason:
+          `You already have an active ${guarded.specialtyConflict.specialty} appointment with Dr. ${guarded.specialtyConflict.doctorName} ` +
+          `on ${guarded.specialtyConflict.date} at ${guarded.specialtyConflict.time}. Finish or cancel it before booking another in this specialty.`,
+        existingAppointment: guarded.specialtyConflict,
+      };
+    }
+
+    if (guarded.conflict) {
+      return {
+        booked: false,
+        reason:
+          `You already have an active appointment with Dr. ${guarded.conflict.doctorName} ` +
+          `on ${guarded.conflict.date} at ${guarded.conflict.time}. Choose a different time.`,
+      };
+    }
+
+    const appt = guarded.appointment;
 
     await Promise.all([
       notifyUser(patientId, {

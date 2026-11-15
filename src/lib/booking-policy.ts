@@ -1,8 +1,10 @@
 
 import type { BookingSuggestion } from "@/app/(patient)/ai-chat/tools";
+import mongoose, { type ClientSession } from "mongoose";
 import connectDB from "@/lib/mongodb";
-import Appointment from "@/models/Appointment";
+import Appointment, { type IAppointment } from "@/models/Appointment";
 import Doctor from "@/models/Doctor";
+import User from "@/models/User";
 import { SLOT_MINUTES, toMinutes } from "@/lib/schedule";
 
 export type ToolContext = {
@@ -38,6 +40,7 @@ export type ActiveSpecialtyAppointment = {
 export async function findActiveAppointmentInSpecialty(
   patientId: string,
   specialty: string,
+  session?: ClientSession,
 ): Promise<ActiveSpecialtyAppointment | null> {
   const specialtyName = specialty.trim();
   if (!specialtyName) return null;
@@ -45,26 +48,32 @@ export async function findActiveAppointmentInSpecialty(
   await connectDB();
 
   const escapedSpecialty = specialtyName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-  const doctors = await Doctor.find({
+  let doctorQuery = Doctor.find({
     specialty: new RegExp("^" + escapedSpecialty + "$", "i"),
   })
-    .select("_id")
-    .lean();
+    .select("_id");
+
+  if (session) doctorQuery = doctorQuery.session(session);
+
+  const doctors = await doctorQuery.lean();
 
   if (doctors.length === 0) return null;
 
   const today = new Date();
   today.setUTCHours(0, 0, 0, 0);
 
-  const appointments = await Appointment.find({
+  let appointmentQuery = Appointment.find({
     patient: patientId,
     doctor: { $in: doctors.map((doctor) => doctor._id) },
     date: { $gte: today },
     status: { $in: ["pending", "confirmed", "in-progress"] },
   })
     .populate("doctor", "name specialty")
-    .sort({ date: 1, time: 1 })
-    .lean();
+    .sort({ date: 1, time: 1 });
+
+  if (session) appointmentQuery = appointmentQuery.session(session);
+
+  const appointments = await appointmentQuery.lean();
 
   const appointment = appointments.find((item) => item.doctor);
   if (!appointment) return null;
@@ -88,6 +97,99 @@ export type PatientTimeConflict = {
   time: string;
 };
 
+export type GuardedAppointmentInput = {
+  patient: string | mongoose.Types.ObjectId;
+  doctor: string | mongoose.Types.ObjectId;
+  date: Date;
+  time: string;
+  type: "video" | "in-person";
+  status: "pending" | "confirmed";
+  price: number;
+};
+
+/**
+ * Serialize operations that reserve a time for the same patient. Updating the
+ * patient's version inside a Mongo transaction makes concurrent transactions
+ * for that patient conflict; the driver's transaction retry then sees the
+ * first booking before it makes the second overlap check.
+ */
+export async function withPatientBookingLock<T>(
+  patientId: string,
+  operation: (session: ClientSession) => Promise<T>,
+): Promise<T> {
+  await connectDB();
+  const session = await mongoose.startSession();
+
+  try {
+    let result: T | undefined;
+
+    await session.withTransaction(async () => {
+      const lock = await User.updateOne(
+        { _id: patientId },
+        { $inc: { bookingLockVersion: 1 } },
+        { session, timestamps: false },
+      );
+
+      if (lock.matchedCount !== 1) {
+        throw new Error("Patient not found while securing appointment time");
+      }
+
+      result = await operation(session);
+    });
+
+    if (result === undefined) {
+      throw new Error("Appointment transaction completed without a result");
+    }
+
+    return result;
+  } finally {
+    await session.endSession();
+  }
+}
+
+/** Create an appointment only after rechecking patient overlap in the lock transaction. */
+export async function createAppointmentWithPatientConflictGuard(
+  input: GuardedAppointmentInput,
+): Promise<
+  | { appointment: IAppointment; conflict: null; specialtyConflict: null }
+  | { appointment: null; conflict: PatientTimeConflict; specialtyConflict: null }
+  | { appointment: null; conflict: null; specialtyConflict: ActiveSpecialtyAppointment }
+> {
+  const patientId = String(input.patient);
+
+  return withPatientBookingLock(patientId, async (session) => {
+    const doctor = await Doctor.findById(input.doctor)
+      .select("specialty")
+      .session(session)
+      .lean();
+
+    if (!doctor) throw new Error("Doctor not found while securing appointment time");
+
+    const specialtyConflict = await findActiveAppointmentInSpecialty(
+      patientId,
+      doctor.specialty ?? "",
+      session,
+    );
+
+    if (specialtyConflict) {
+      return { appointment: null, conflict: null, specialtyConflict };
+    }
+
+    const conflict = await findPatientTimeConflict(
+      patientId,
+      input.date,
+      input.time,
+      undefined,
+      session,
+    );
+
+    if (conflict) return { appointment: null, conflict, specialtyConflict: null };
+
+    const [appointment] = await Appointment.create([input], { session });
+    return { appointment, conflict: null, specialtyConflict: null };
+  });
+}
+
 /**
  * Checks whether the patient already has an active appointment that overlaps
  * the requested 30-minute appointment, regardless of the doctor.
@@ -103,6 +205,7 @@ export async function findPatientTimeConflict(
   date: Date,
   time: string,
   excludeAppointmentId?: string,
+  session?: ClientSession,
 ): Promise<PatientTimeConflict | null> {
   const requestedStart = toMinutes(time);
 
@@ -120,7 +223,7 @@ export async function findPatientTimeConflict(
 
   await connectDB();
 
-  const appointments = await Appointment.find({
+  let query = Appointment.find({
     patient: patientId,
     date: {
       $gte: startOfDay,
@@ -135,8 +238,11 @@ export async function findPatientTimeConflict(
   })
     .select("date time")
     .populate("doctor", "name")
-    .sort({ time: 1 })
-    .lean();
+    .sort({ time: 1 });
+
+  if (session) query = query.session(session);
+
+  const appointments = await query.lean();
 
   for (const appointment of appointments) {
     const existingStart = toMinutes(appointment.time);

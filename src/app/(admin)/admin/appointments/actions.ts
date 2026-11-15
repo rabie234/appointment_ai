@@ -24,6 +24,7 @@ import {
   type NextStatus,
 } from "@/lib/appointment-transitions"
 import {
+  createAppointmentWithPatientConflictGuard,
   findActiveAppointmentInSpecialty,
   findPatientTimeConflict,
 } from "@/lib/booking-policy"
@@ -354,26 +355,10 @@ export async function adminCreateAppointment(
     }
   }
 
-  // Recheck just before creation to reduce the chance of a stale check.
-  const latestTimeConflict = await findPatientTimeConflict(
-    patientId,
-    date,
-    time
-  )
-
-  if (latestTimeConflict) {
-    return {
-      error:
-        `This patient already has an active appointment with Dr. ${latestTimeConflict.doctorName} ` +
-        `on ${latestTimeConflict.date} at ${latestTimeConflict.time}. ` +
-        "Choose a different time.",
-    }
-  }
-
   let appointmentId = ""
 
   try {
-    const appointment = await Appointment.create({
+    const guarded = await createAppointmentWithPatientConflictGuard({
       patient: patientId,
       doctor: doctorId,
       date,
@@ -384,7 +369,25 @@ export async function adminCreateAppointment(
       price: CONSULTATION_FEE,
     })
 
-    appointmentId = String(appointment._id)
+    if (guarded.specialtyConflict) {
+      return {
+        error:
+          `This patient already has an active ${guarded.specialtyConflict.specialty} appointment ` +
+          `with Dr. ${guarded.specialtyConflict.doctorName} on ${guarded.specialtyConflict.date} at ${guarded.specialtyConflict.time}. ` +
+          "Complete or cancel it before booking another in this specialty.",
+      }
+    }
+
+    if (guarded.conflict) {
+      return {
+        error:
+          `This patient already has an active appointment with Dr. ${guarded.conflict.doctorName} ` +
+          `on ${guarded.conflict.date} at ${guarded.conflict.time}. ` +
+          "Choose a different time.",
+      }
+    }
+
+    appointmentId = String(guarded.appointment._id)
   } catch (error) {
     console.error("Admin create appointment failed:", error)
 

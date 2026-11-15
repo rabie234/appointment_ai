@@ -19,7 +19,10 @@ import {
 } from "@/lib/schedule"
 import { getClinicHours } from "@/lib/clinic-hours";
 import { isPastClinicSlot } from "@/lib/slots-server";
-import { findPatientTimeConflict } from "@/lib/booking-policy";
+import {
+    findPatientTimeConflict,
+    withPatientBookingLock,
+} from "@/lib/booking-policy";
 
 export async function cancelPatientAppointment(appointmentId: string) {
     try {
@@ -34,11 +37,34 @@ export async function cancelPatientAppointment(appointmentId: string) {
 
         await connectDB()
 
+        const target = await Appointment.findOne({
+            _id: appointmentId,
+            patient: session.user.id,
+            status: { $in: ["pending", "confirmed"] },
+        }).select("date time")
+
+        if (!target) {
+            return {
+                success: false,
+                message: "Appointment cannot be cancelled",
+            }
+        }
+
+        const targetDate = new Date(target.date).toISOString().slice(0, 10)
+        if (isPastClinicSlot(targetDate, target.time)) {
+            return {
+                success: false,
+                message: "This appointment has already started and can no longer be cancelled.",
+            }
+        }
+
         const appointment = await Appointment.findOneAndUpdate(
             {
                 _id: appointmentId,
                 patient: session.user.id,
                 status: { $in: ["pending", "confirmed"] },
+                date: target.date,
+                time: target.time,
             },
             {
                 $set: {
@@ -116,11 +142,41 @@ export async function cancelLeaveConflictAppointment(
 
         await connectDB()
 
+        const target = await Appointment.findOne({
+            _id: appointmentId,
+            patient: session.user.id,
+            status: { $in: ["pending", "confirmed"] },
+            $or: [
+                { clinicHoursConflict: true },
+                { leaveConflict: true },
+                {
+                    scheduleChangeRequestId: {
+                        $exists: true,
+                        $ne: null,
+                    },
+                },
+            ],
+        }).select("date time")
+
+        if (!target) {
+            return { success: false, message: "Appointment cannot be cancelled" }
+        }
+
+        const targetDate = new Date(target.date).toISOString().slice(0, 10)
+        if (isPastClinicSlot(targetDate, target.time)) {
+            return {
+                success: false,
+                message: "This appointment has already started and can no longer be cancelled.",
+            }
+        }
+
         const appointment = await Appointment.findOneAndUpdate(
             {
                 _id: appointmentId,
                 patient: session.user.id,
                 status: { $in: ["pending", "confirmed"] },
+                date: target.date,
+                time: target.time,
                 $or: [
                     { clinicHoursConflict: true },
                     { leaveConflict: true },
@@ -379,40 +435,73 @@ export async function rescheduleLeaveConflictAppointment(
             }
         }
 
-        // Recheck immediately before saving the new time.
-        const latestPatientTimeConflict = await findPatientTimeConflict(
+        const guardedReschedule = await withPatientBookingLock(
             session.user.id,
-            date,
-            time,
-            String(appointment._id)
+            async (transactionSession) => {
+                const latestConflict = await findPatientTimeConflict(
+                    session.user.id,
+                    date,
+                    time,
+                    String(appointment._id),
+                    transactionSession
+                )
+
+                if (latestConflict) {
+                    return {
+                        error:
+                            `You already have an active appointment with Dr. ${latestConflict.doctorName} ` +
+                            `on ${latestConflict.date} at ${latestConflict.time}. Please choose another time.`,
+                    }
+                }
+
+                const currentAppointment = await Appointment.findOne({
+                    _id: appointment._id,
+                    patient: session.user.id,
+                    status: { $in: ["pending", "confirmed"] },
+                    $or: [
+                        { clinicHoursConflict: true },
+                        { leaveConflict: true },
+                        {
+                            scheduleChangeRequestId: {
+                                $exists: true,
+                                $ne: null,
+                            },
+                        },
+                    ],
+                }).session(transactionSession)
+
+                if (!currentAppointment) {
+                    return {
+                        error: "Appointment is no longer available to reschedule.",
+                    }
+                }
+
+                currentAppointment.date = date
+                currentAppointment.time = time
+
+                if (currentAppointment.status === "confirmed") {
+                    currentAppointment.status = "pending"
+                }
+
+                currentAppointment.leaveConflict = false
+                currentAppointment.clinicHoursConflict = false
+                currentAppointment.scheduleChangeRequestId = undefined
+
+                await currentAppointment.save({ session: transactionSession })
+                return { appointment: currentAppointment }
+            }
         )
 
-        if (latestPatientTimeConflict) {
-            return {
-                success: false,
-                message:
-                    `You already have an active appointment with Dr. ${latestPatientTimeConflict.doctorName} ` +
-                    `on ${latestPatientTimeConflict.date} at ${latestPatientTimeConflict.time}. Please choose another time.`,
-            }
+        if ("error" in guardedReschedule) {
+            return { success: false, message: guardedReschedule.error }
         }
 
-        appointment.date = date
-        appointment.time = time
-
-        if (appointment.status === "confirmed") {
-            appointment.status = "pending"
-        }
-
-        appointment.leaveConflict = false
-        appointment.clinicHoursConflict = false
-        appointment.scheduleChangeRequestId = undefined
-
-        await appointment.save()
+        const rescheduledAppointment = guardedReschedule.appointment
 
         const context = dateStr + " · " + time
 
         await Promise.all([
-            notifyDoctor(String(appointment.doctor), {
+            notifyDoctor(String(rescheduledAppointment.doctor), {
                 category: "appointment",
                 titleKey: "Notification: Appointment rescheduled by patient",
                 bodyKey: "Notification body: A patient selected a new time for an affected appointment. Please review and confirm the new time.",

@@ -11,6 +11,8 @@ export interface IUser extends Document {
   password: string;
   role: Role;
   phone?: string;
+  /** Internal version used to serialize concurrent bookings for this patient. */
+  bookingLockVersion?: number;
   createdAt: Date;
   updatedAt: Date;
   comparePassword(candidatePassword: string): Promise<boolean>;
@@ -48,6 +50,11 @@ const UserSchema = new Schema<IUser>(
     phone: {
       type: String,
       trim: true,
+    },
+    bookingLockVersion: {
+      type: Number,
+      default: 0,
+      select: false,
     },
   },
   { timestamps: true }

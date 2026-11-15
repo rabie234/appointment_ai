@@ -389,8 +389,8 @@ export default async function AdminReportsPage({
     const cur = summarize(current)
     const prev = summarize(previous)
 
-    const visits = current.filter(
-        (appointment) => appointment.status !== "completed"
+    const bookedVisits = current.filter(
+        (appointment) => appointment.status !== "cancelled"
     )
     const completedVisits = current.filter(
         (appointment) => appointment.status === "completed"
@@ -463,7 +463,7 @@ export default async function AdminReportsPage({
 
     const byHour = new Map<number, number>()
 
-    for (const appointment of visits) {
+    for (const appointment of bookedVisits) {
         const hour = Number.parseInt(appointment.time.slice(0, 2), 10)
 
         if (!Number.isNaN(hour)) {
@@ -486,7 +486,7 @@ export default async function AdminReportsPage({
 
     const specialtyCounts = new Map<string, number>()
 
-    for (const appointment of visits) {
+    for (const appointment of bookedVisits) {
         const specialty = appointment.doctor?.specialty ?? "Unknown"
 
         specialtyCounts.set(
@@ -538,9 +538,11 @@ export default async function AdminReportsPage({
         return map
     }
 
-    const previousByDoctor = tally(previous)
+    const previousByDoctor = tally(
+        previous.filter((appointment) => appointment.status !== "cancelled")
+    )
 
-    const topDoctors = [...tally(current).entries()]
+    const topDoctors = [...tally(bookedVisits).entries()]
         .sort(
             (a, b) =>
                 b[1].booked - a[1].booked ||
@@ -729,7 +731,7 @@ export default async function AdminReportsPage({
                                     <span className="text-muted-foreground">
                                         {" "}
                                         · {peak[1]} {t(language, "of")}{" "}
-                                        {visits.length} {t(language, "visits")}
+                                        {bookedVisits.length} {t(language, "visits")}
                                     </span>
                                 </p>
                             ) : (
@@ -755,7 +757,7 @@ export default async function AdminReportsPage({
                                         <li
                                             key={name}
                                             className="space-y-1.5"
-                                            title={`${name}: ${count} ${t(language, "of")} ${visits.length} ${t(language, "visits")}`}
+                                            title={`${name}: ${count} ${t(language, "of")} ${bookedVisits.length} ${t(language, "visits")}`}
                                         >
                                             <div className="flex items-center justify-between gap-2 text-sm">
                                                 <span className="truncate">
@@ -764,14 +766,14 @@ export default async function AdminReportsPage({
 
                                                 <span className="text-xs font-bold tabular-nums">
                                                     {Math.round(
-                                                        (count / visits.length) *
+                                                        (count / bookedVisits.length) *
                                                             100
                                                     )}
                                                     %
                                                 </span>
                                             </div>
 
-                                            <Bar share={count / visits.length} />
+                                            <Bar share={count / bookedVisits.length} />
                                         </li>
                                     ))}
                                 </ul>

@@ -44,14 +44,22 @@ export function resolveRange(key: string | undefined, now: Date = new Date()): R
     const end = new Date(today.getTime() + DAY_MS)
 
     if (range.key === "12m") {
-        // Whole calendar months, so monthly buckets are never partial at the start.
-        const y = today.getUTCFullYear()
-        const m = today.getUTCMonth()
+        // A rolling year starts on the same calendar date one year earlier.
+        // Clamp leap-day/month-end dates to the final valid day in that month.
+        const year = today.getUTCFullYear() - 1
+        const month = today.getUTCMonth()
+        const day = Math.min(
+            today.getUTCDate(),
+            new Date(Date.UTC(year, month + 1, 0)).getUTCDate()
+        )
+        const start = new Date(Date.UTC(year, month, day))
+        const duration = end.getTime() - start.getTime()
+
         return {
             ...range,
-            start: new Date(Date.UTC(y, m - 11, 1)),
+            start,
             end,
-            prevStart: new Date(Date.UTC(y, m - 23, 1)),
+            prevStart: new Date(start.getTime() - duration),
             prevLabel: "previous 12 months",
         }
     }
