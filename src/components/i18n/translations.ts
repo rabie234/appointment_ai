@@ -1,4 +1,4 @@
-﻿import type { Language } from "./language-provider";
+import type { Language } from "./language-provider";
 
 const translations = {
     "Dashboard": "لوحة التحكم",
@@ -383,6 +383,7 @@ const translations = {
 "Busiest Hour": "الساعة الأكثر ازدحامًا",
 "visits": "زيارة",
 "No visits in this period": "لا توجد زيارات خلال هذه الفترة",
+"No completed visits in this period": "لا توجد زيارات مكتملة خلال هذه الفترة",
 "Popular Specialties": "التخصصات الأكثر طلبًا",
 "Most Booked Doctors": "الأطباء الأكثر حجزًا",
 "Ranked by appointments in this period, excluding cancellations; change vs": "مرتّبون حسب عدد المواعيد خلال هذه الفترة، باستثناء المواعيد الملغاة؛ التغيير مقارنةً بـ",

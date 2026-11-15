@@ -392,6 +392,9 @@ export default async function AdminReportsPage({
     const visits = current.filter(
         (appointment) => appointment.status !== "completed"
     )
+    const completedVisits = current.filter(
+        (appointment) => appointment.status === "completed"
+    )
 
     const kpis: {
         title: string
@@ -472,12 +475,14 @@ export default async function AdminReportsPage({
         (a, b) => b[1] - a[1] || a[0] - b[0]
     )[0]
 
-    const videoVisits = visits.filter(
+    const videoVisits = completedVisits.filter(
         (appointment) => appointment.type === "video"
     ).length
 
     const videoShare =
-        visits.length > 0 ? videoVisits / visits.length : null
+        completedVisits.length > 0
+            ? videoVisits / completedVisits.length
+            : null
 
     const specialtyCounts = new Map<string, number>()
 
@@ -702,9 +707,9 @@ export default async function AdminReportsPage({
                             value={percent(videoShare)}
                             share={videoShare}
                             note={
-                                visits.length > 0
-                                    ? `${videoVisits} ${t(language, "video")} · ${visits.length - videoVisits} ${t(language, "in-person")}`
-                                    : t(language, "No visits in this period")
+                                completedVisits.length > 0
+                                    ? `${videoVisits} ${t(language, "video")} · ${completedVisits.length - videoVisits} ${t(language, "in-person")}`
+                                    : t(language, "No completed visits in this period")
                             }
                             language={language}
                         />

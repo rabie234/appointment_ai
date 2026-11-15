@@ -95,6 +95,15 @@ export async function applyTransition(options: {
     };
   }
 
+  if (
+    (next === "in-progress" || next === "completed") &&
+    !scheduledStartPassed
+  ) {
+    return {
+      error: "This appointment cannot be started or completed before its scheduled time.",
+    };
+  }
+
   // Before confirming, ensure this patient has no overlapping active
   // appointment with another doctor (or the same doctor).
   if (next === "confirmed") {
