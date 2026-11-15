@@ -87,6 +87,43 @@ function groupSandboxTests(tests: SandboxTest[]) {
   }));
 }
 
+function getTestHistoryStatus(
+  test: SandboxTest,
+  tr: (text: string) => string,
+) {
+  if (!test.success) return tr("Request failed");
+
+  if (test.expectedPhrase) {
+    return test.passed
+      ? tr("Expected phrase found")
+      : tr("Expected phrase not found");
+  }
+
+  if (test.passed === undefined || test.passed === null) {
+    return tr("Expected phrase not set");
+  }
+
+  return tr("Expected phrase not saved");
+}
+
+function getTestHistoryVariant(
+  test: SandboxTest,
+): "destructive" | "success" | "secondary" {
+  if (
+    !test.success ||
+    (Boolean(test.expectedPhrase) && test.passed === false)
+  ) {
+    return "destructive";
+  }
+
+  if (test.expectedPhrase && test.passed === true) {
+    return "success";
+  }
+
+  return "secondary";
+}
+
+
 function hasDraft(entry: TrainingEntry) {
   return (
     !entry.published ||
@@ -112,125 +149,10 @@ function dateLabel(value: string, language: Language) {
   });
 }
 
-const AI_TRAINING_AR: Record<string, string> = {
-  "AI Training & Intelligence": "تدريب وذكاء المساعد",
-  "AI performance": "أداء المساعد الذكي",
-  "Activity history": "سجل النشاط",
-  "Add a clinic FAQ": "إضافة سؤال شائع للمركز",
-  "Add your first FAQ or upload a clinic document above.":
-    "أضيفي أول سؤال شائع أو ارفعي مستندًا للمركز أعلاه.",
-  "All statuses": "كل الحالات",
-  "Answer or source text": "الإجابة أو نص المصدر",
-  "Approved answer": "الإجابة المعتمدة",
-  Archived: "مؤرشف",
-  "Archived. This entry is no longer used in chat.":
-    "تمت الأرشفة. لم تعد هذه المعلومة تُستخدم في المحادثة.",
-  "Assistant test panel": "لوحة اختبار المساعد",
-  "Booking preview": "معاينة الحجز",
-  Cancel: "إلغاء",
-  "Cancel edit": "إلغاء التعديل",
-  Category: "الفئة",
-  "Click or drag a file to preview": "اضغطي أو اسحبي ملفًا لمعاينته",
-  "Clinic FAQs, policies, and appointment preparation. PDFs need selectable text.":
-    "الأسئلة الشائعة وسياسات المركز والتحضير للمواعيد. يجب أن تحتوي ملفات PDF على نص قابل للتحديد.",
-  "Close test panel": "إغلاق لوحة الاختبار",
-  "Close version history": "إغلاق سجل الإصدارات",
-  Delete: "حذف",
-  "Delete entry": "حذف العنصر",
-  "Discard upload preview": "إلغاء معاينة الملف",
-  "Do I need to bring my ID?": "هل أحتاج إلى إحضار هويتي؟",
-  "Download example FAQ JSON": "تنزيل مثال للأسئلة الشائعة بصيغة JSON",
-  Draft: "مسودة",
-  "Draft saved. Test it, then publish when ready.":
-    "تم حفظ المسودة. اختبريها ثم انشريها عندما تصبح جاهزة.",
-  "Drafts & changes": "المسودات والتعديلات",
-  Edit: "تعديل",
-  "Edit draft answer": "تعديل إجابة المسودة",
-  "Entry deleted. Its audit history has been retained.":
-    "تم حذف العنصر مع الاحتفاظ بسجل التدقيق الخاص به.",
-  "Expected phrase found": "تم العثور على العبارة المتوقعة",
-  "Expected phrase not found": "لم يتم العثور على العبارة المتوقعة",
-  "Expected phrase not set": "لم يتم تحديد عبارة متوقعة",
-  "Expected phrases use a case-insensitive text match.":
-    "تتم مطابقة العبارات المتوقعة دون التمييز بين الأحرف الكبيرة والصغيرة.",
-  "Filter knowledge status": "تصفية حالة المعرفة",
-  "Knowledge changes will appear here.": "ستظهر تغييرات المعرفة هنا.",
-  "Knowledge library": "مكتبة المعرفة",
-  "Knowledge version": "نسخة المعرفة",
-  "Latest 40 changes · Beirut time": "آخر 40 تغييرًا · توقيت بيروت",
-  "Launch Trainer": "فتح لوحة التدريب",
-  "Loading knowledge…": "جارٍ تحميل المعرفة…",
-  "No appointment was created.": "لم يتم إنشاء أي موعد.",
-  "No clinic knowledge was retrieved for this question.":
-    "لم يتم استرجاع معلومات من معرفة المركز لهذا السؤال.",
-  "No data yet": "لا توجد بيانات بعد",
-  "Patient chat · last 30 days": "محادثة المرضى · آخر 30 يومًا",
-  "Preview extracted content before importing it as drafts. Up to 5 MB per file.":
-    "راجعي المحتوى المستخرج قبل استيراده كمسودات. الحد الأقصى 5 ميغابايت لكل ملف.",
-  "Publish draft": "نشر المسودة",
-  Published: "منشور",
-  "Published knowledge (patient view)": "المعرفة المنشورة (عرض المريض)",
-  "Published · draft changes": "منشور · توجد تعديلات كمسودة",
-  "Published. Patient chat can now use this version.":
-    "تم النشر. يمكن لمحادثة المرضى استخدام هذه النسخة الآن.",
-  "Question / intent": "السؤال / الغرض",
-  "Question or section title": "السؤال أو عنوان القسم",
-  "Recent assistant tests": "اختبارات المساعد الأخيرة",
-  "Trainer History": "سجل التدريب",
-  "Latest 15 test runs · repeated questions are grouped.":
-    "آخر 15 محاولة اختبار · جُمعت الأسئلة المتكررة معًا.",
-  "Expected phrase:": "العبارة المتوقعة:",
-  "Expected phrase unavailable for this older test.":
-    "العبارة المتوقعة غير متاحة لهذا الاختبار القديم.",
-  "No expected phrase was set for this test.": "لم يتم تحديد عبارة متوقعة لهذا الاختبار.",
-  attempts: "محاولات",
-  "Show all questions": "عرض كل الأسئلة",
-  "Show fewer questions": "عرض أسئلة أقل",
-  "Question unavailable": "السؤال غير متاح",
-  Refresh: "تحديث",
-  "Refresh library": "تحديث المكتبة",
-  "Remove this entry from the library and patient chat?":
-    "هل تريدين إزالة هذا العنصر من المكتبة ومحادثة المرضى؟",
-  "Request failed": "فشل الطلب",
-  "Restore as draft": "استعادة كمسودة",
-  "Restored as a draft. Review and publish when ready.":
-    "تمت الاستعادة كمسودة. راجعيها وانشريها عندما تصبح جاهزة.",
-  "Review clinic knowledge, test the assistant, and publish approved answers.":
-    "راجعي معلومات المركز، واختبري المساعد، وانشري الإجابات المعتمدة.",
-  "Run a test to see results here.": "شغّلي اختبارًا لعرض النتائج هنا.",
-  "Run test": "تشغيل الاختبار",
-  "Save a draft, test the answer, then publish it for patients.":
-    "احفظي الإجابة كمسودة، واختبريها، ثم انشريها للمرضى.",
-  "Saved drafts (includes unpublished entries)":
-    "المسودات المحفوظة (بما فيها العناصر غير المنشورة)",
-  "Search knowledge library": "البحث في مكتبة المعرفة",
-  "Search questions, categories, or sources…":
-    "ابحثي في الأسئلة أو الفئات أو المصادر…",
-  "Something went wrong. Please retry.":
-    "حدث خطأ ما. يرجى المحاولة مجددًا.",
-  "Test failed. Please retry.": "فشل الاختبار. يرجى المحاولة مجددًا.",
-  "Test question": "سؤال الاختبار",
-  "Test saved drafts or published knowledge. Doctor availability is live; booking suggestions are previews and cannot create appointments.":
-    "اختبري المسودات المحفوظة أو المعرفة المنشورة. توافر الأطباء مباشر؛ واقتراحات الحجز للمعاينة فقط ولا تنشئ مواعيد.",
-  "Testing assistant…": "جارٍ اختبار المساعد…",
-  "Upload clinic knowledge": "رفع معلومات المركز",
-  "Upload clinic knowledge document": "رفع مستند معلومات المركز",
-  "Version history": "سجل الإصدارات",
-  Versions: "الإصدارات",
-  "What should I bring to my appointment?":
-    "ماذا يجب أن أحضر إلى موعدي؟",
-  "What should I bring to my first appointment?":
-    "ماذا يجب أن أحضر إلى موعدي الأول؟",
-  "Your published answer stays live until you publish these changes.":
-    "ستبقى الإجابة المنشورة الحالية فعّالة حتى تنشري هذه التعديلات.",
-  "e.g. bring your insurance card": "مثال: أحضر بطاقة التأمين الخاصة بك",
-};
-
 export default function AdminAITrainingPage() {
   const { language } = useLanguage();
 
-  const tr = (text: string) =>
-    language === "ar" ? (AI_TRAINING_AR[text] ?? t(language, text)) : text;
+  const tr = (text: string) => t(language, text);
 
   const [data, setData] = useState<TrainingData | null>(null);
   const [loading, setLoading] = useState(true);
@@ -1378,50 +1300,39 @@ export default function AdminAITrainingPage() {
               <div id="trainer-test-groups" className="space-y-3">
                 {visibleTestGroups.map((group) => {
                   const latest = group.attempts[0];
-                  const status = !latest.success
-                    ? tr("Request failed")
-                    : latest.passed === undefined
-                      ? tr("Expected phrase not set")
-                      : latest.passed
-                        ? tr("Expected phrase found")
-                        : tr("Expected phrase not found");
 
                   return (
                     <details
                       key={latest.id}
-                      className="group rounded-lg border bg-background px-3 py-2"
+                      className="group rounded-lg border bg-background px-3 py-3"
                     >
-                      <summary className="flex cursor-pointer list-none flex-wrap items-center justify-between gap-2">
-                        <span className="line-clamp-2 min-w-0 flex-1 text-sm font-medium">
+                      <summary className="flex cursor-pointer list-none flex-col items-stretch gap-2 sm:flex-row sm:items-start">
+                        <span className="w-full min-w-0 flex-1 whitespace-normal break-words text-sm font-medium leading-relaxed [overflow-wrap:anywhere] sm:w-auto">
                           {group.question || tr("Question unavailable")}
                         </span>
-                        <span className="flex shrink-0 flex-wrap items-center gap-2">
+
+                        <span className="flex w-full min-w-0 shrink-0 flex-wrap items-center justify-start gap-2 sm:w-auto sm:justify-end">
                           {group.attempts.length > 1 && (
                             <Badge variant="outline">
                               {group.attempts.length} {tr("attempts")}
                             </Badge>
                           )}
-                          <Badge
-                            variant={
-                              !latest.success || latest.passed === false
-                                ? "destructive"
-                                : latest.passed
-                                  ? "success"
-                                  : "secondary"
-                            }
-                          >
-                            {status}
+                          <Badge variant={getTestHistoryVariant(latest)}>
+                            {getTestHistoryStatus(latest, tr)}
                           </Badge>
+                          <ChevronDown
+                            aria-hidden="true"
+                            className="h-4 w-4 shrink-0 text-muted-foreground transition-transform group-open:rotate-180"
+                          />
                         </span>
-                        <ChevronDown
-                          aria-hidden="true"
-                          className="h-4 w-4 shrink-0 text-muted-foreground transition-transform group-open:rotate-180"
-                        />
                       </summary>
 
                       <div className="mt-3 space-y-3 border-t pt-3">
                         {group.attempts.map((test) => (
-                          <div key={test.id} className="space-y-1 text-xs">
+                          <div
+                            key={test.id}
+                            className="space-y-2 rounded-md bg-muted/30 p-3 text-xs"
+                          >
                             <div className="flex flex-wrap items-center justify-between gap-2">
                               <span className="text-muted-foreground">
                                 {dateLabel(test.at, language)}
@@ -1430,37 +1341,29 @@ export default function AdminAITrainingPage() {
                                 {(test.durationMs / 1000).toFixed(1)}s
                               </span>
                             </div>
-                            <Badge
-                              variant={
-                                !test.success || test.passed === false
-                                  ? "destructive"
-                                  : test.passed
-                                    ? "success"
-                                    : "secondary"
-                              }
-                            >
-                              {!test.success
-                                ? tr("Request failed")
-                                : test.passed === undefined
-                                  ? tr("Expected phrase not set")
-                                  : test.passed
-                                    ? tr("Expected phrase found")
-                                    : tr("Expected phrase not found")}
+
+                            <Badge variant={getTestHistoryVariant(test)}>
+                              {getTestHistoryStatus(test, tr)}
                             </Badge>
+
                             {test.expectedPhrase ? (
-                              <p className="break-words text-muted-foreground">
-                                {tr("Expected phrase:")} {test.expectedPhrase}
-                              </p>
-                            ) : test.passed !== undefined ? (
+                              <div className="space-y-1">
+                                <p className="font-medium text-muted-foreground">
+                                  {tr("Expected phrase:")}
+                                </p>
+                                <p className="whitespace-pre-wrap break-words rounded-md border bg-background p-2 text-foreground">
+                                  {test.expectedPhrase}
+                                </p>
+                              </div>
+                            ) : test.passed === undefined ||
+                              test.passed === null ? (
                               <p className="text-muted-foreground">
-                                {tr(
-                                  "Expected phrase unavailable for this older test.",
-                                )}
+                                {tr("No expected phrase was set for this test.")}
                               </p>
                             ) : (
                               <p className="text-muted-foreground">
                                 {tr(
-                                  "No expected phrase was set for this test.",
+                                  "Expected phrase unavailable for this older test.",
                                 )}
                               </p>
                             )}

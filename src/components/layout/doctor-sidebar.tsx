@@ -11,9 +11,9 @@ import { useLanguage } from "@/components/i18n/language-provider"
 import { t } from "@/components/i18n/translations"
 
 const doctorNavItems = [
+    { name: "My Account", href: "/doctor/account", icon: UserCog },
     { name: "Appointments", href: "/doctor/appointments", icon: Calendar },
     { name: "Leaves", href: "/doctor/leaves", icon: CalendarDays },
-    { name: "My Account", href: "/doctor/account", icon: UserCog },
     { name: "Working Hours", href: "/doctor/working-hours", icon: Clock },
 ]
 
