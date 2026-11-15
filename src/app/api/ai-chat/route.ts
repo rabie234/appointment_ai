@@ -11,6 +11,7 @@ import {
   type BookingConfirmation,
 } from "../../(patient)/ai-chat/tools";
 import type { ChatTurn } from "../../(patient)/ai-chat/chat-core";
+import { formatTime12h } from "@/lib/time-format";
 
 export const dynamic = "force-dynamic";
 
@@ -61,6 +62,7 @@ export async function POST(req: NextRequest) {
 
   let history: ChatTurn[] = [];
   let approvedBooking: BookingSuggestion | undefined;
+  let pendingBookingAcknowledgement: BookingSuggestion | undefined;
   try {
     await connectDB();
     if (confirmProposalId) {
@@ -84,13 +86,26 @@ export async function POST(req: NextRequest) {
         );
       approvedBooking = claimed.pendingBooking;
     } else if (conversationId) {
-      const conversation = await Conversation.findOneAndUpdate(
+      const conversation = await Conversation.findOne(
         { _id: conversationId, patient: patientId },
-        { $unset: { pendingBooking: 1 } },
-        { new: false },
       ).lean();
       if (!conversation)
         return new Response("Conversation not found.", { status: 404 });
+      if (
+        conversation.pendingBooking &&
+        isBookingAcknowledgement(message)
+      ) {
+        pendingBookingAcknowledgement = conversation.pendingBooking;
+      } else if (conversation.pendingBooking) {
+        await Conversation.updateOne(
+          {
+            _id: conversationId,
+            patient: patientId,
+            "pendingBooking.proposalId": conversation.pendingBooking.proposalId,
+          },
+          { $unset: { pendingBooking: 1 } },
+        );
+      }
       // The browser cannot supply assistant history or fabricate a previous confirmation.
       history = conversation.messages
         .slice(-40)
@@ -184,6 +199,14 @@ export async function POST(req: NextRequest) {
               }`;
             }
           }
+          send({ type: "delta", text });
+        } else if (pendingBookingAcknowledgement) {
+          suggestion = pendingBookingAcknowledgement;
+          send({ type: "suggestion", data: suggestion });
+          text = bookingAcknowledgementText(
+            pendingBookingAcknowledgement,
+            responseLanguage,
+          );
           send({ type: "delta", text });
         } else {
           const result = await runAssistant({
@@ -316,4 +339,29 @@ async function persist(options: {
     pendingBooking: options.suggestion,
   });
   return { conversationId: String(doc._id), title: doc.title };
+}
+
+function isBookingAcknowledgement(message: string): boolean {
+  return /^(?:ok(?:ay)?|yes|yeah|yep|sure|go ahead|book(?: it)?|confirm(?: it)?|sounds good|please do|نعم|اي|إي|إيه|تمام|موافق|اوكي|أوكي)[.!?؟\s]*$/i.test(
+    message.trim(),
+  );
+}
+
+function bookingAcknowledgementText(
+  suggestion: BookingSuggestion,
+  responseLanguage: string,
+): string {
+  const arabic = responseLanguage === "Arabic";
+  const date = new Date(`${suggestion.date}T00:00:00.000Z`);
+  const dateLabel = Number.isNaN(date.getTime())
+    ? suggestion.date
+    : new Intl.DateTimeFormat(arabic ? "ar-LB" : "en-US", {
+        dateStyle: "long",
+        timeZone: "UTC",
+      }).format(date);
+  const time = formatTime12h(suggestion.time, arabic ? "ar" : "en");
+
+  return arabic
+    ? `الموعد المقترح مع ${suggestion.doctorName} بتاريخ ${dateLabel} الساعة ${time} لم يُحجز بعد. اضغط زر تأكيد الحجز على البطاقة أعلاه لإتمامه.`
+    : `The proposed appointment with ${suggestion.doctorName} on ${dateLabel} at ${time} is not booked yet. Click Confirm booking on the card above to complete it.`;
 }
