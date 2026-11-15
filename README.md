@@ -94,7 +94,9 @@ Open http://localhost:3000. Sign in as the administrator at /auth/login to use /
 
 On Vercel Pro or Enterprise, pending appointment requests are checked every minute. Requests still pending when their scheduled start time passes are cancelled with a reason, and the patient and administrators receive in-app notifications. Set `CRON_SECRET` in the Vercel project's production environment variables to a long random value; Vercel sends it to the protected cron route automatically. The scheduled job runs on production deployments, not with `npm run dev`. Vercel Hobby only supports daily cron execution, so this minute-by-minute configuration requires a minute-level scheduler plan or another scheduler.
 
-To run the protected job once during local development, set `CRON_SECRET` in `.env.local` and restart the dev server. Then put the same local value in your PowerShell session before calling the route:
+During local development, `npm run dev` starts a development-only check immediately and then every minute. It uses the configured database and does not require calling the cron route manually. Restart the dev server after adding this instrumentation.
+
+For an optional manual one-off run, set `CRON_SECRET` in `.env.local` and restart the dev server. Then put the same local value in your PowerShell session before calling the route:
 
 ~~~powershell
 $env:CRON_SECRET = "replace-with-the-same-local-secret"

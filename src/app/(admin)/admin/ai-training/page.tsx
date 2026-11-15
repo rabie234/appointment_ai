@@ -92,37 +92,20 @@ function getTestHistoryStatus(
   tr: (text: string) => string,
 ) {
   if (!test.success) return tr("Request failed");
-
-  if (test.expectedPhrase) {
-    return test.passed
-      ? tr("Expected phrase found")
-      : tr("Expected phrase not found");
-  }
-
-  if (test.passed === undefined || test.passed === null) {
-    return tr("Expected phrase not set");
-  }
-
-  return tr("Expected phrase not saved");
+  if (test.passed === true) return tr("Expected phrase found");
+  if (test.passed === false) return tr("Expected phrase not found");
+  return tr("Expected phrase not set");
 }
 
-function getTestHistoryVariant(
-  test: SandboxTest,
-): "destructive" | "success" | "secondary" {
-  if (
-    !test.success ||
-    (Boolean(test.expectedPhrase) && test.passed === false)
-  ) {
-    return "destructive";
+function getTestHistoryClassName(test: SandboxTest) {
+  if (!test.success || test.passed === false) {
+    return "border-red-200 bg-red-50 text-red-700 dark:border-red-900 dark:bg-red-950/40 dark:text-red-300";
   }
-
-  if (test.expectedPhrase && test.passed === true) {
-    return "success";
+  if (test.passed === true) {
+    return "border-green-200 bg-green-50 text-green-700 dark:border-green-900 dark:bg-green-950/40 dark:text-green-300";
   }
-
-  return "secondary";
+  return "border-amber-200 bg-amber-50 text-amber-800 dark:border-amber-900 dark:bg-amber-950/40 dark:text-amber-300";
 }
-
 
 function hasDraft(entry: TrainingEntry) {
   return (
@@ -1306,18 +1289,18 @@ export default function AdminAITrainingPage() {
                       key={latest.id}
                       className="group rounded-lg border bg-background px-3 py-3"
                     >
-                      <summary className="flex cursor-pointer list-none flex-col items-stretch gap-2 sm:flex-row sm:items-start">
-                        <span className="w-full min-w-0 flex-1 whitespace-normal break-words text-sm font-medium leading-relaxed [overflow-wrap:anywhere] sm:w-auto">
+                      <summary className="flex w-full min-w-0 cursor-pointer list-none flex-col items-stretch gap-3">
+                        <span className="block w-full min-w-0 whitespace-pre-wrap break-words text-sm font-medium leading-relaxed [overflow-wrap:anywhere]">
                           {group.question || tr("Question unavailable")}
                         </span>
 
-                        <span className="flex w-full min-w-0 shrink-0 flex-wrap items-center justify-start gap-2 sm:w-auto sm:justify-end">
+                        <span className="flex w-full min-w-0 flex-wrap items-center justify-start gap-2">
                           {group.attempts.length > 1 && (
                             <Badge variant="outline">
                               {group.attempts.length} {tr("attempts")}
                             </Badge>
                           )}
-                          <Badge variant={getTestHistoryVariant(latest)}>
+                          <Badge className={getTestHistoryClassName(latest)}>
                             {getTestHistoryStatus(latest, tr)}
                           </Badge>
                           <ChevronDown
@@ -1342,7 +1325,7 @@ export default function AdminAITrainingPage() {
                               </span>
                             </div>
 
-                            <Badge variant={getTestHistoryVariant(test)}>
+                            <Badge className={getTestHistoryClassName(test)}>
                               {getTestHistoryStatus(test, tr)}
                             </Badge>
 
@@ -1363,7 +1346,7 @@ export default function AdminAITrainingPage() {
                             ) : (
                               <p className="text-muted-foreground">
                                 {tr(
-                                  "Expected phrase unavailable for this older test.",
+                                  "Expected phrase was not saved for this older test.",
                                 )}
                               </p>
                             )}

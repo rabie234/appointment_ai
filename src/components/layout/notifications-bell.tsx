@@ -17,6 +17,7 @@ export function NotificationsBell() {
     const { language } = useLanguage()
     const router = useRouter()
     const menuRef = useRef<HTMLDivElement>(null)
+    const seenNotificationIds = useRef(new Set<string>())
     const [open, setOpen] = useState(false)
     const [items, setItems] = useState<NotificationView[]>([])
     const [unreadCount, setUnreadCount] = useState(0)
@@ -28,8 +29,21 @@ export function NotificationsBell() {
     async function refreshNotifications() {
         try {
             const result = await getMyNotifications()
+            const hasNewAppointmentExpiry = result.items.some(
+                (item) =>
+                    (item.titleKey === "Notification: Appointment request expired" ||
+                        item.titleKey ===
+                            "Notification: Pending appointment automatically cancelled") &&
+                    !seenNotificationIds.current.has(item.id),
+            )
+
+            result.items.forEach((item) =>
+                seenNotificationIds.current.add(item.id),
+            )
             setItems(result.items)
             setUnreadCount(result.unreadCount)
+
+            if (hasNewAppointmentExpiry) router.refresh()
         } catch (error) {
             console.error("Load notifications failed:", error)
         }
