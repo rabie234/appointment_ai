@@ -1,3 +1,4 @@
+
 import { Type, type FunctionDeclaration } from "@google/genai";
 import { isValidObjectId, Types } from "mongoose";
 import connectDB from "@/lib/mongodb";
@@ -11,6 +12,7 @@ import { searchKnowledge } from "@/lib/knowledge-server";
 import {
   bookingIsAuthorized,
   findActiveAppointmentInSpecialty,
+  findPatientTimeConflict,
   type ToolContext,
 } from "@/lib/booking-policy";
 import { notifyAdmins, notifyUser } from "@/lib/notification-service";
@@ -118,35 +120,35 @@ export const functionDeclarations: FunctionDeclaration[] = [
       required: ["doctorId", "date", "time"],
     },
   },
-  
-   {
-  name: "find_my_appointments",
-  description:
-    "Retrieve appointments belonging to the signed-in patient. " +
-    "Use upcoming by default. Patients can request specific statuses or history.",
-  parameters: {
-    type: Type.OBJECT,
-    properties: {
-      doctorName: {
-        type: Type.STRING,
-        description: "Optional doctor name or partial name.",
-      },
-      status: {
-        type: Type.STRING,
-        enum: [
-          "upcoming",
-          "confirmed",
-          "pending",
-          "cancelled",
-          "history",
-          "all",
-        ],
-        description:
-          "Use upcoming by default. Choose a specific filter when requested.",
+
+  {
+    name: "find_my_appointments",
+    description:
+      "Retrieve appointments belonging to the signed-in patient. " +
+      "Use upcoming by default. Patients can request specific statuses or history.",
+    parameters: {
+      type: Type.OBJECT,
+      properties: {
+        doctorName: {
+          type: Type.STRING,
+          description: "Optional doctor name or partial name.",
+        },
+        status: {
+          type: Type.STRING,
+          enum: [
+            "upcoming",
+            "confirmed",
+            "pending",
+            "cancelled",
+            "history",
+            "all",
+          ],
+          description:
+            "Use upcoming by default. Choose a specific filter when requested.",
+        },
       },
     },
   },
-},
   {
     name: "propose_cancellation",
     description:
@@ -187,13 +189,16 @@ export type CancellationSuggestion = {
 
 async function listSpecialties() {
   await connectDB();
+
   const [specialtyDocs, usedSpecialties] = await Promise.all([
     Specialty.find().select("name description").sort({ name: 1 }).lean(),
     Doctor.distinct("specialty", { status: "active" }),
   ]);
+
   const names = Array.from(
     new Set([...specialtyDocs.map((s) => s.name), ...usedSpecialties]),
   ).sort();
+
   return { specialties: names };
 }
 
@@ -203,19 +208,20 @@ async function findDoctors(
 ) {
   const specialty = String(args.specialty ?? "").trim();
   const name = String(args.name ?? "").trim();
+
   if (!specialty && !name) {
     return { error: "Provide a doctor name, a specialty, or both." };
   }
 
   await connectDB();
+
   const filter: Record<string, unknown> = { status: "active" };
-  // Case-insensitive exact match so "cardiology" still matches "Cardiology".
+
   if (specialty)
     filter.specialty = new RegExp(`^${escapeRegExp(specialty)}$`, "i");
+
   if (name) filter.name = new RegExp(escapeRegExp(name), "i");
 
-  // Leave is date-specific and stored separately; the profile availability
-  // flag can be stale, so only get_available_slots determines live availability.
   const docs = await Doctor.find(filter)
     .select("name specialty rating experience")
     .sort({ rating: -1 })
@@ -243,10 +249,15 @@ async function findDoctors(
 async function getAvailableSlots(args: { doctorId?: string; date?: string }) {
   const doctorId = String(args.doctorId ?? "");
   const date = String(args.date ?? "");
-  if (!doctorId || !date) return { error: "doctorId and date are required" };
+
+  if (!doctorId || !date) {
+    return { error: "doctorId and date are required" };
+  }
 
   const result = await freeSlotsFor(doctorId, date);
+
   if (result.error) return { error: result.error };
+
   return { date, slots: result.slots ?? [] };
 }
 
@@ -308,7 +319,13 @@ async function findMyAppointments(
     status: { $in: statusFilters[status] },
   })
     .populate("doctor", "name specialty")
-    .sort({ date: status === "all" || status === "history" || status === "cancelled" ? -1 : 1, time: 1 })
+    .sort({
+      date:
+        status === "all" || status === "history" || status === "cancelled"
+          ? -1
+          : 1,
+      time: 1,
+    })
     .lean();
 
   return {
@@ -345,6 +362,7 @@ async function proposeCancellation(
   args: { appointmentId: string },
 ) {
   const appointmentId = String(args.appointmentId ?? "");
+
   if (!isValidObjectId(appointmentId)) {
     return { error: "Invalid appointment ID." };
   }
@@ -380,9 +398,8 @@ async function proposeCancellation(
 }
 
 /**
- * Validate the model's proposal against real data before we surface it. Returns
- * either a confirmed suggestion (attached to the action's response) or an error
- * the model should react to.
+ * Validate the model's proposal against real data before we surface it.
+ * Returns either a confirmed suggestion or an error.
  */
 async function proposeBooking(
   args: {
@@ -395,24 +412,52 @@ async function proposeBooking(
   const doctorId = String(args.doctorId ?? "");
   const date = String(args.date ?? "");
   const time = String(args.time ?? "");
+
   if (!doctorId || !date || !time) {
     return { ok: false, error: "doctorId, date and time are required" };
   }
-  if (!isValidObjectId(doctorId))
+
+  if (!isValidObjectId(doctorId)) {
     return { ok: false, error: "Invalid doctor id" };
+  }
+
+  const parsedDate = parseDay(date);
+
+  if (!parsedDate) {
+    return { ok: false, error: "Invalid date" };
+  }
 
   await connectDB();
+
   const doctor = await Doctor.findById(doctorId)
     .select("name specialty status")
     .lean();
+
   if (!doctor || doctor.status !== "active") {
     return { ok: false, error: "That doctor is not available" };
+  }
+
+  // NEW: Do not even suggest a time that overlaps an active patient booking.
+  const timeConflict = await findPatientTimeConflict(
+    patientId,
+    parsedDate,
+    time
+  );
+
+  if (timeConflict) {
+    return {
+      ok: false,
+      error:
+        `You already have an active appointment with Dr. ${timeConflict.doctorName} ` +
+        `on ${timeConflict.date} at ${timeConflict.time}. Choose a different time.`,
+    };
   }
 
   const existingAppointment = await findActiveAppointmentInSpecialty(
     patientId,
     doctor.specialty ?? "",
   );
+
   if (existingAppointment) {
     return {
       ok: false,
@@ -423,7 +468,9 @@ async function proposeBooking(
   }
 
   const { slots, error } = await freeSlotsFor(doctorId, date);
+
   if (error) return { ok: false, error };
+
   if (!slots?.includes(time)) {
     return {
       ok: false,
@@ -439,6 +486,7 @@ async function proposeBooking(
     date,
     time,
   };
+
   return { ok: true, suggestion };
 }
 
@@ -452,10 +500,8 @@ export type BookingConfirmation = {
 };
 
 /**
- * Create the appointment. Re-validates everything server-side and guards the
- * slot right before insert. On conflict (slot taken, or doctor not available
- * then) it returns booked:false with the reason and the remaining free times so
- * the assistant can offer an alternative instead of failing.
+ * Create the appointment. Re-validates everything server-side.
+ * The patient-wide overlap check is repeated at final confirmation.
  */
 async function confirmBooking(
   patientId: string,
@@ -464,6 +510,7 @@ async function confirmBooking(
   const doctorId = String(args.doctorId ?? "");
   const date = String(args.date ?? "");
   const time = String(args.time ?? "");
+
   const type =
     String(args.type ?? "in-person") === "video" ? "video" : "in-person";
 
@@ -472,26 +519,49 @@ async function confirmBooking(
   }
 
   const day = parseDay(date);
-  if (!day) return { booked: false, reason: "Invalid date" };
+
+  if (!day) {
+    return { booked: false, reason: "Invalid date" };
+  }
 
   const today = new Date();
   today.setUTCHours(0, 0, 0, 0);
-  if (day < today)
+
+  if (day < today) {
     return { booked: false, reason: "That date has already passed" };
+  }
 
   await connectDB();
 
   const doctor = await Doctor.findById(doctorId)
     .select("name specialty status")
     .lean();
+
   if (!doctor || doctor.status !== "active") {
     return { booked: false, reason: "That doctor is not available" };
+  }
+
+  // NEW: Final patient-wide conflict check before the booking is created.
+  const timeConflict = await findPatientTimeConflict(
+    patientId,
+    day,
+    time
+  );
+
+  if (timeConflict) {
+    return {
+      booked: false,
+      reason:
+        `You already have an active appointment with Dr. ${timeConflict.doctorName} ` +
+        `on ${timeConflict.date} at ${timeConflict.time}. Choose a different time.`,
+    };
   }
 
   const existingAppointment = await findActiveAppointmentInSpecialty(
     patientId,
     doctor.specialty ?? "",
   );
+
   if (existingAppointment) {
     return {
       booked: false,
@@ -503,14 +573,32 @@ async function confirmBooking(
 
   // The source of truth for "is this slot bookable right now".
   const { slots, error } = await freeSlotsFor(doctorId, date);
-  if (error) return { booked: false, reason: error };
+
+  if (error) {
+    return { booked: false, reason: error };
+  }
 
   if (!slots?.includes(time)) {
-    // Conflict — the slot is gone (or never existed). Offer what's still free.
     return {
       booked: false,
       reason: `${doctor.name} is not available on ${date} at ${time}.`,
       alternatives: slots ?? [],
+    };
+  }
+
+  // Recheck once more immediately before insert.
+  const latestTimeConflict = await findPatientTimeConflict(
+    patientId,
+    day,
+    time
+  );
+
+  if (latestTimeConflict) {
+    return {
+      booked: false,
+      reason:
+        `You already have an active appointment with Dr. ${latestTimeConflict.doctorName} ` +
+        `on ${latestTimeConflict.date} at ${latestTimeConflict.time}. Choose a different time.`,
     };
   }
 
@@ -550,9 +638,11 @@ async function confirmBooking(
       time,
       type,
     };
+
     return { booked: true, confirmation };
   } catch (err) {
     console.error("confirm_booking failed:", err);
+
     return {
       booked: false,
       reason: "Could not create the appointment. Please try again.",
@@ -563,8 +653,8 @@ async function confirmBooking(
 /**
  * Dispatch a model function call by name. Returns the tool result to feed back
  * to the model, plus (when applicable) a booking `suggestion`, a booking
- * `confirmation`, or a `cancellationSuggestion` that the caller lifts onto the
- * stream so the UI can render the matching card.
+ * `confirmation`, or a `cancellationSuggestion` that the caller lifts onto
+ * the stream so the UI can render the matching card.
  *
  * `patientId` comes from the authenticated session, never from the model.
  */
@@ -584,26 +674,34 @@ export async function runTool(
       const query = String(args.query ?? "")
         .trim()
         .slice(0, 2000);
+
       const knowledgeMode =
         context.mode === "test"
           ? (context.knowledgeMode ?? "draft")
           : "published";
+
       return {
         result: { sources: await searchKnowledge(query, knowledgeMode) },
       };
     }
+
     case "list_specialties":
       return { result: await listSpecialties() };
+
     case "find_doctors":
       return { result: await findDoctors(args, patientId) };
+
     case "get_available_slots":
       return { result: await getAvailableSlots(args) };
+
     case "propose_booking": {
       const res = await proposeBooking(args, patientId);
+
       return res.ok
         ? { result: { ok: true }, suggestion: res.suggestion }
         : { result: res };
     }
+
     case "confirm_booking": {
       if (!bookingIsAuthorized(context, args)) {
         return {
@@ -614,45 +712,52 @@ export async function runTool(
           },
         };
       }
+
       const res = await confirmBooking(patientId, args);
+
       return res.booked
         ? { result: { booked: true }, confirmation: res.confirmation }
         : { result: res };
     }
+
     case "find_my_appointments": {
-  const allowedStatuses: AppointmentFilter[] = [
-    "upcoming",
-    "confirmed",
-    "pending",
-    "cancelled",
-    "history",
-    "all",
-  ];
+      const allowedStatuses: AppointmentFilter[] = [
+        "upcoming",
+        "confirmed",
+        "pending",
+        "cancelled",
+        "history",
+        "all",
+      ];
 
-  const requestedStatus = String(args.status ?? "upcoming");
+      const requestedStatus = String(args.status ?? "upcoming");
 
-  const status: AppointmentFilter =
-    allowedStatuses.includes(requestedStatus as AppointmentFilter)
-      ? (requestedStatus as AppointmentFilter)
-      : "upcoming";
+      const status: AppointmentFilter =
+        allowedStatuses.includes(requestedStatus as AppointmentFilter)
+          ? (requestedStatus as AppointmentFilter)
+          : "upcoming";
 
-  return {
-    result: await findMyAppointments(patientId, {
-      doctorName: String(args.doctorName ?? ""),
-      status,
-    }),
-  };
-}
+      return {
+        result: await findMyAppointments(patientId, {
+          doctorName: String(args.doctorName ?? ""),
+          status,
+        }),
+      };
+    }
+
     case "propose_cancellation": {
       const res = await proposeCancellation(patientId, {
         appointmentId: String(args.appointmentId ?? ""),
       });
+
       if ("error" in res) return { result: res };
+
       return {
         result: { message: "Cancellation suggestion prepared." },
         cancellationSuggestion: res,
       };
     }
+
     default:
       return { result: { error: `Unknown tool: ${name}` } };
   }

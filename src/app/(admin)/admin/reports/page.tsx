@@ -9,7 +9,6 @@ import {
     CalendarCheck,
     CalendarX,
     DollarSign,
-    Star,
     Download,
     ArrowUpRight,
     ArrowDownRight,
@@ -21,9 +20,9 @@ import connectDB from "@/lib/mongodb"
 import { requireRole } from "@/lib/session"
 import Appointment, { type IAppointment } from "@/models/Appointment"
 import AIRun from "@/models/AIRun"
-import Doctor from "@/models/Doctor"
 import { OutcomesChart, type OutcomeBucket } from "./outcomes-chart"
 import { RANGES, resolveRange, type ResolvedRange } from "./range"
+import { PENDING_APPOINTMENT_EXPIRED_REASON } from "@/lib/pending-appointment-expiry"
 import { t } from "@/components/i18n/translations";
 import type { Language } from "@/components/i18n/language-provider";
 export const dynamic = "force-dynamic"
@@ -39,13 +38,13 @@ type PopulatedDoctor = {
     name?: string
     nameAr?: string
     specialty?: string
-    rating?: number
 } | null
 
 type Appt = {
     date: Date
     time: string
     status: Status
+    cancellationReason?: string
     type: IAppointment["type"]
     price: number
     doctor: PopulatedDoctor
@@ -62,15 +61,12 @@ function createDateFormatter(
 }
 
 function money(value: number, language: Language): string {
-    return new Intl.NumberFormat(
-        language === "ar" ? "ar-LB" : "en-US",
-        {
-            style: "currency",
-            currency: "USD",
-            maximumFractionDigits: 0,
-            notation: value >= 10_000 ? "compact" : "standard",
-        }
-    ).format(value)
+    return new Intl.NumberFormat(language === "ar" ? "ar-LB" : "en-US", {
+        style: "currency",
+        currency: "USD",
+        maximumFractionDigits: 0,
+        notation: value >= 10_000 ? "compact" : "standard",
+    }).format(value)
 }
 
 function to12h(hour: number, language: Language): string {
@@ -129,25 +125,26 @@ function changeDelta(
     }
 }
 
-function pointsDelta(
-    current: number | null,
-    previous: number | null,
-    upIsGood = true
-): Delta | undefined {
-    if (current === null || previous === null) return undefined
+function countDelta(
+    current: number,
+    previous: number,
+    language: Language
+): Delta {
+    const difference = current - previous
 
-    const pts = Math.round((current - previous) * 100)
-
-    if (pts === 0) {
-        return { text: "0 pts", direction: "flat", good: null }
+    if (difference === 0) {
+        return { text: t(language, "No change"), direction: "flat", good: null }
     }
 
-    const up = pts > 0
+    const up = difference > 0
+    const formatted = Math.abs(difference).toLocaleString(
+        language === "ar" ? "ar-LB" : "en-US"
+    )
 
     return {
-        text: `${up ? "+" : ""}${pts} pts`,
+        text: `${up ? "+" : "-"}${formatted}`,
         direction: up ? "up" : "down",
-        good: up === upIsGood,
+        good: up,
     }
 }
 
@@ -157,7 +154,14 @@ function summarize(list: Appt[]) {
 
     const completed = count("completed")
     const missed = count("missed")
-    const cancelled = count("cancelled")
+    const expired = list.filter(
+        (appointment) =>
+            appointment.status === "cancelled" &&
+            appointment.cancellationReason === PENDING_APPOINTMENT_EXPIRED_REASON
+    ).length
+    const cancelled = count("cancelled") - expired
+    const scheduled = list.length - completed - missed - count("cancelled")
+    const cancellationEligible = list.length - expired
     const due = completed + missed
 
     return {
@@ -165,12 +169,16 @@ function summarize(list: Appt[]) {
         completed,
         missed,
         cancelled,
+        expired,
+        scheduled,
+        cancellationEligible,
         due,
         revenue: list
             .filter((appointment) => appointment.status === "completed")
             .reduce((sum, appointment) => sum + appointment.price, 0),
         completionRate: due > 0 ? completed / due : null,
-        cancellationRate: list.length > 0 ? cancelled / list.length : null,
+        cancellationRate:
+            cancellationEligible > 0 ? cancelled / cancellationEligible : null,
     }
 }
 
@@ -291,6 +299,7 @@ function outcomeBuckets(
             completed: 0,
             missed: 0,
             cancelled: 0,
+            expired: 0,
             scheduled: 0,
         })
     )
@@ -310,8 +319,16 @@ function outcomeBuckets(
 
         if (appointment.status === "completed") bucket.completed++
         else if (appointment.status === "missed") bucket.missed++
-        else if (appointment.status === "cancelled") bucket.cancelled++
-        else bucket.scheduled++
+        else if (appointment.status === "cancelled") {
+            if (
+                appointment.cancellationReason ===
+                PENDING_APPOINTMENT_EXPIRED_REASON
+            ) {
+                bucket.expired++
+            } else {
+                bucket.cancelled++
+            }
+        } else bucket.scheduled++
     }
 
     return buckets
@@ -339,14 +356,14 @@ export default async function AdminReportsPage({
 
     await connectDB()
 
-    const [appointmentDocs, aiRuns, doctorRatings] = await Promise.all([
+    const [appointmentDocs, aiRuns] = await Promise.all([
         Appointment.find({
             date: { $gte: range.prevStart, $lt: range.end },
         })
-            .select("date time status type price doctor")
+            .select("date time status cancellationReason type price doctor")
             .populate<{ doctor: PopulatedDoctor }>(
                 "doctor",
-                "name nameAr specialty rating"
+                "name nameAr specialty"
             )
             .lean(),
 
@@ -355,10 +372,6 @@ export default async function AdminReportsPage({
             createdAt: { $gte: range.start, $lt: range.end },
         })
             .select("success durationMs knowledgeSearches knowledgeHits")
-            .lean(),
-
-        Doctor.find({ status: "active" })
-            .select("rating reviews")
             .lean(),
     ])
 
@@ -387,15 +400,14 @@ export default async function AdminReportsPage({
         color: string
         bg: string
         delta?: Delta
-        note: string
+        note?: string
     }[] = [
         {
-            title: "Booked Appointments",
+            title: "Appointments",
             value: cur.booked.toLocaleString(
                 language === "ar" ? "ar-LB" : "en-US"
             ),
-            delta: changeDelta(cur.booked, prev.booked),
-            note: `${cur.cancelled} ${t(language, "later cancelled")}`,
+            delta: countDelta(cur.booked, prev.booked, language),
             icon: Calendar,
             color: "text-blue-600",
             bg: "bg-blue-100 dark:bg-blue-900/20",
@@ -403,11 +415,7 @@ export default async function AdminReportsPage({
         {
             title: "Completion Rate",
             value: percent(cur.completionRate),
-            delta: pointsDelta(cur.completionRate, prev.completionRate),
-            note:
-                cur.due > 0
-                    ? `${cur.completed} ${t(language, "of")} ${cur.due} ${t(language, "due visits attended")}`
-                    : t(language, "No visits came due"),
+            note: `${cur.completed}/${cur.due} ${t(language, "attended")}`,
             icon: CalendarCheck,
             color: "text-emerald-600",
             bg: "bg-emerald-100 dark:bg-emerald-900/20",
@@ -415,22 +423,15 @@ export default async function AdminReportsPage({
         {
             title: "Cancellation Rate",
             value: percent(cur.cancellationRate),
-            delta: pointsDelta(cur.cancellationRate, prev.cancellationRate, false),
-            note: `${cur.cancelled} ${t(language, "of")} ${cur.booked} ${t(language, "bookings")}`,
+            note: `${cur.cancelled}/${cur.cancellationEligible} ${t(language, "bookings")}${cur.expired > 0 ? ` · ${cur.expired} ${t(language, "Expired")}` : ""}`,
             icon: CalendarX,
             color: "text-orange-600",
             bg: "bg-orange-100 dark:bg-orange-900/20",
         },
         {
-            title: "Revenue",
+            title: "Completed Visit Value",
             value: money(cur.revenue, language),
-            delta: changeDelta(
-                cur.revenue,
-                prev.revenue,
-                true,
-                (value) => money(value, language)
-            ),
-            note: t(language, "From completed visits"),
+            note: `${cur.completed} ${t(language, "visits")}`,
             icon: DollarSign,
             color: "text-purple-600",
             bg: "bg-purple-100 dark:bg-purple-900/20",
@@ -478,30 +479,6 @@ export default async function AdminReportsPage({
     const videoShare =
         visits.length > 0 ? videoVisits / visits.length : null
 
-    const reviewTotal = doctorRatings.reduce(
-        (sum, doctor) => sum + (doctor.reviews ?? 0),
-        0
-    )
-
-    const ratedDoctors = doctorRatings.filter(
-        (doctor) => (doctor.rating ?? 0) > 0
-    )
-
-    const avgRating =
-        reviewTotal > 0
-            ? doctorRatings.reduce(
-                  (sum, doctor) =>
-                      sum +
-                      (doctor.rating ?? 0) * (doctor.reviews ?? 0),
-                  0
-              ) / reviewTotal
-            : ratedDoctors.length > 0
-              ? ratedDoctors.reduce(
-                    (sum, doctor) => sum + (doctor.rating ?? 0),
-                    0
-                ) / ratedDoctors.length
-              : null
-
     const specialtyCounts = new Map<string, number>()
 
     for (const appointment of visits) {
@@ -524,7 +501,6 @@ export default async function AdminReportsPage({
                 name: string
                 nameAr: string
                 specialty: string
-                rating: number
                 booked: number
                 completed: number
             }
@@ -541,7 +517,6 @@ export default async function AdminReportsPage({
                 name: appointment.doctor.name ?? "Unknown doctor",
                 nameAr: appointment.doctor.nameAr ?? "",
                 specialty: appointment.doctor.specialty ?? "",
-                rating: appointment.doctor.rating ?? 0,
                 booked: 0,
                 completed: 0,
             }
@@ -628,29 +603,24 @@ export default async function AdminReportsPage({
                 ))}
             </nav>
 
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
+            <div className="grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-4">
                 {kpis.map((kpi) => (
                     <Card
                         key={kpi.title}
-                        className="border-none shadow-sm bg-card/60 backdrop-blur-sm group hover:shadow-md transition-all"
+                        className="border-none bg-card/60 shadow-sm transition-all hover:shadow-md"
                     >
                         <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
                             <CardTitle className="text-sm font-medium text-muted-foreground">
                                 {t(language, kpi.title)}
                             </CardTitle>
-
-                            <div
-                                className={`${kpi.bg} ${kpi.color} p-2 rounded-xl transition-transform group-hover:scale-110`}
-                            >
+                            <div className={`${kpi.bg} ${kpi.color} rounded-xl p-2`}>
                                 <kpi.icon className="h-5 w-5" />
                             </div>
                         </CardHeader>
-
                         <CardContent>
-                            <div className="text-2xl font-bold">
+                            <div className="text-2xl font-bold tabular-nums">
                                 {kpi.value}
                             </div>
-
                             {kpi.delta && (
                                 <DeltaLine
                                     delta={kpi.delta}
@@ -658,10 +628,11 @@ export default async function AdminReportsPage({
                                     language={language}
                                 />
                             )}
-
-                            <p className="mt-1 text-xs text-muted-foreground">
-                                {t(language, kpi.note)}
-                            </p>
+                            {kpi.note && (
+                                <p className="mt-1 text-xs text-muted-foreground">
+                                    {kpi.note}
+                                </p>
+                            )}
                         </CardContent>
                     </Card>
                 ))}
@@ -734,24 +705,6 @@ export default async function AdminReportsPage({
                                 visits.length > 0
                                     ? `${videoVisits} ${t(language, "video")} · ${visits.length - videoVisits} ${t(language, "in-person")}`
                                     : t(language, "No visits in this period")
-                            }
-                            language={language}
-                        />
-
-                        <Metric
-                            label="Avg doctor rating"
-                            value={
-                                avgRating === null
-                                    ? "—"
-                                    : `${avgRating.toFixed(1)} / 5`
-                            }
-                            share={
-                                avgRating === null ? null : avgRating / 5
-                            }
-                            note={
-                                reviewTotal > 0
-                                    ? `${reviewTotal.toLocaleString()} ${t(language, "reviews")} · ${t(language, "all time")}`
-                                    : t(language, "All time")
                             }
                             language={language}
                         />
@@ -890,7 +843,7 @@ export default async function AdminReportsPage({
                                         {t(language, doctor.specialty)}
                                     </p>
 
-                                    <div className="flex items-center justify-between text-sm">
+                                    <div className="flex items-center text-sm">
                                         <div
                                             className="flex items-center text-muted-foreground font-medium"
                                             title={`${doctor.completed} ${t(language, "completed")}`}
@@ -898,13 +851,6 @@ export default async function AdminReportsPage({
                                             <Calendar className="h-3.5 w-3.5 mr-1" />
                                             {doctor.booked} {t(language, "booked")} ·{" "}
                                             {doctor.completed} {t(language, "done")}
-                                        </div>
-
-                                        <div className="flex items-center font-bold">
-                                            <Star className="h-3.5 w-3.5 mr-1 text-amber-500 fill-amber-500" />
-                                            {doctor.rating
-                                                ? doctor.rating.toFixed(1)
-                                                : "—"}
                                         </div>
                                     </div>
                                 </div>

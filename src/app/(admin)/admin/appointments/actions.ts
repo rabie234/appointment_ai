@@ -1,3 +1,4 @@
+
 "use server"
 
 import { revalidatePath } from "next/cache"
@@ -22,7 +23,10 @@ import {
   applyTransition,
   type NextStatus,
 } from "@/lib/appointment-transitions"
-import { findActiveAppointmentInSpecialty } from "@/lib/booking-policy"
+import {
+  findActiveAppointmentInSpecialty,
+  findPatientTimeConflict,
+} from "@/lib/booking-policy"
 
 export type AppointmentActionState = {
   error?: string
@@ -71,7 +75,9 @@ async function transition(
         doctorBody: "Notification body: An appointment was marked as missed.",
       },
     } as const
+
     const event = events[next as keyof typeof events]
+
     if (event) {
       await notifyAppointmentParties(
         id,
@@ -187,6 +193,7 @@ export type AdminSlotsResult = {
 export async function getDoctorSlots(
   doctorId: string,
   dateStr: string,
+  patientId?: string,
 ): Promise<AdminSlotsResult> {
   await requireRole("admin")
 
@@ -212,16 +219,34 @@ export async function getDoctorSlots(
   )
   const taken = await bookedTimes(doctorId, date)
 
-  return {
-    slots: availableSlots(schedule, date, taken).filter(
-      (slot) => !isPastClinicSlot(dateStr, slot),
-    ),
+  const doctorSlots = availableSlots(schedule, date, taken).filter(
+    (slot) => !isPastClinicSlot(dateStr, slot),
+  )
+
+  if (!patientId) {
+    return { slots: doctorSlots }
   }
+
+  const patientSlots: string[] = []
+
+  for (const slot of doctorSlots) {
+    const conflict = await findPatientTimeConflict(
+      patientId,
+      date,
+      slot,
+    )
+
+    if (!conflict) {
+      patientSlots.push(slot)
+    }
+  }
+
+  return { slots: patientSlots }
 }
 
 /**
  * Creates an appointment for a patient after checking the doctor,
- * date, schedule, leave, and slot availability on the server.
+ * date, schedule, leave, doctor slot availability, and patient conflicts.
  */
 export async function adminCreateAppointment(
   _prev: AppointmentActionState,
@@ -247,8 +272,11 @@ export async function adminCreateAppointment(
   const date = parseDay(dateStr)
   if (!date) return { error: "Invalid date" }
   if (!isValidTime(time)) return { error: "Invalid time" }
+
   if (isPastClinicSlot(dateStr, time)) {
-    return { error: "That time has already passed. Please choose another slot." }
+    return {
+      error: "That time has already passed. Please choose another slot.",
+    }
   }
 
   const today = new Date()
@@ -270,6 +298,23 @@ export async function adminCreateAppointment(
     return { error: "This doctor is not accepting appointments" }
   }
 
+  // NEW: Check the patient's active appointments across all doctors.
+  const timeConflict = await findPatientTimeConflict(
+    patientId,
+    date,
+    time
+  )
+
+  if (timeConflict) {
+    return {
+      error:
+        `This patient already has an active appointment with Dr. ${timeConflict.doctorName} ` +
+        `on ${timeConflict.date} at ${timeConflict.time}. ` +
+        "Choose a different time.",
+    }
+  }
+
+  // Preserve the existing specialty booking policy.
   const existingAppointment = await findActiveAppointmentInSpecialty(
     patientId,
     doctor.specialty ?? "",
@@ -309,7 +354,24 @@ export async function adminCreateAppointment(
     }
   }
 
+  // Recheck just before creation to reduce the chance of a stale check.
+  const latestTimeConflict = await findPatientTimeConflict(
+    patientId,
+    date,
+    time
+  )
+
+  if (latestTimeConflict) {
+    return {
+      error:
+        `This patient already has an active appointment with Dr. ${latestTimeConflict.doctorName} ` +
+        `on ${latestTimeConflict.date} at ${latestTimeConflict.time}. ` +
+        "Choose a different time.",
+    }
+  }
+
   let appointmentId = ""
+
   try {
     const appointment = await Appointment.create({
       patient: patientId,
@@ -321,9 +383,11 @@ export async function adminCreateAppointment(
       status: "confirmed",
       price: CONSULTATION_FEE,
     })
+
     appointmentId = String(appointment._id)
   } catch (error) {
     console.error("Admin create appointment failed:", error)
+
     return {
       error: "Could not create the appointment. Please try again.",
     }

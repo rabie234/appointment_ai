@@ -571,7 +571,11 @@ function CreateDialog({
         let cancelled = false
 
         startLoadingSlots(async () => {
-            const result = await getDoctorSlots(doctorId, date)
+           const result = await getDoctorSlots(
+    doctorId,
+    date,
+    patientId || undefined,
+)
 
             if (!cancelled) {
                 setSlots(result.slots ?? [])
@@ -581,7 +585,7 @@ function CreateDialog({
         return () => {
             cancelled = true
         }
-    }, [doctorId, date])
+    }, [doctorId, date, patientId])
 
     useEffect(() => {
         if (!hasSelectedDate) {

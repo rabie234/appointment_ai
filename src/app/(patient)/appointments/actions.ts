@@ -1,3 +1,4 @@
+
 "use server"
 
 import { revalidatePath } from "next/cache"
@@ -18,6 +19,8 @@ import {
 } from "@/lib/schedule"
 import { getClinicHours } from "@/lib/clinic-hours";
 import { isPastClinicSlot } from "@/lib/slots-server";
+import { findPatientTimeConflict } from "@/lib/booking-policy";
+
 export async function cancelPatientAppointment(appointmentId: string) {
     try {
         const session = await requireRole("patient")
@@ -62,6 +65,7 @@ export async function cancelPatientAppointment(appointmentId: string) {
             new Date(appointment.date).toISOString().slice(0, 10) +
             " · " +
             appointment.time
+
         await Promise.all([
             notifyDoctor(String(appointment.doctor), {
                 category: "appointment",
@@ -154,11 +158,12 @@ export async function cancelLeaveConflictAppointment(
             new Date(appointment.date).toISOString().slice(0, 10) +
             " · " +
             appointment.time
+
         await Promise.all([
             notifyDoctor(String(appointment.doctor), {
                 category: "appointment",
                 titleKey: "Notification: Patient cancelled appointment",
-                bodyKey: "Notification body: A patient cancelled an appointment on your schedule.",
+                bodyKey: "Notification body: A patient cancelled an appointment.",
                 href: "/doctor/appointments",
                 context,
             }),
@@ -264,6 +269,24 @@ export async function rescheduleLeaveConflictAppointment(
             }
         }
 
+        // Check whether this new time overlaps another active appointment
+        // belonging to the same patient, excluding the appointment being moved.
+        const patientTimeConflict = await findPatientTimeConflict(
+            session.user.id,
+            date,
+            time,
+            String(appointment._id)
+        )
+
+        if (patientTimeConflict) {
+            return {
+                success: false,
+                message:
+                    `You already have an active appointment with Dr. ${patientTimeConflict.doctorName} ` +
+                    `on ${patientTimeConflict.date} at ${patientTimeConflict.time}. Please choose another time.`,
+            }
+        }
+
         const doctor = await Doctor.findById(appointment.doctor)
             .select("schedule status")
             .lean()
@@ -322,13 +345,15 @@ export async function rescheduleLeaveConflictAppointment(
             }
         }
 
-        const clinicSchedule = await getClinicHours();
+        const clinicSchedule = await getClinicHours()
+
         const effectiveSchedule = intersectSchedules(
             schedule,
             clinicSchedule
-        );
-        const day = dayOfWeek(date);
-        const entry = effectiveSchedule.find((item) => item.day === day);
+        )
+
+        const day = dayOfWeek(date)
+        const entry = effectiveSchedule.find((item) => item.day === day)
 
         if (!entry || entry.closed || !slotsForDay(entry).includes(time)) {
             return {
@@ -354,17 +379,38 @@ export async function rescheduleLeaveConflictAppointment(
             }
         }
 
+        // Recheck immediately before saving the new time.
+        const latestPatientTimeConflict = await findPatientTimeConflict(
+            session.user.id,
+            date,
+            time,
+            String(appointment._id)
+        )
+
+        if (latestPatientTimeConflict) {
+            return {
+                success: false,
+                message:
+                    `You already have an active appointment with Dr. ${latestPatientTimeConflict.doctorName} ` +
+                    `on ${latestPatientTimeConflict.date} at ${latestPatientTimeConflict.time}. Please choose another time.`,
+            }
+        }
+
         appointment.date = date
         appointment.time = time
+
         if (appointment.status === "confirmed") {
             appointment.status = "pending"
         }
+
         appointment.leaveConflict = false
         appointment.clinicHoursConflict = false
         appointment.scheduleChangeRequestId = undefined
+
         await appointment.save()
 
         const context = dateStr + " · " + time
+
         await Promise.all([
             notifyDoctor(String(appointment.doctor), {
                 category: "appointment",

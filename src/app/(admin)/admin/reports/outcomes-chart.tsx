@@ -21,6 +21,7 @@ export type OutcomeBucket = {
     completed: number
     missed: number
     cancelled: number
+    expired: number
     scheduled: number
 }
 
@@ -28,6 +29,7 @@ const OUTCOMES = [
     { key: "completed", label: "Completed", fill: "bg-series-1" },
     { key: "missed", label: "Missed", fill: "bg-series-2" },
     { key: "cancelled", label: "Cancelled", fill: "bg-series-3" },
+    { key: "expired", label: "Expired (not confirmed)", fill: "bg-muted-foreground" },
     { key: "scheduled", label: "Scheduled", fill: "bg-series-4" },
 ] as const
 
@@ -37,7 +39,7 @@ const DEFAULT_PLOT_PX = 640
 const TOOLTIP_PX = 176
 
 function total(b: OutcomeBucket): number {
-    return b.completed + b.missed + b.cancelled + b.scheduled
+    return b.completed + b.missed + b.cancelled + b.expired + b.scheduled
 }
 
 function niceTicks(max: number): number[] {

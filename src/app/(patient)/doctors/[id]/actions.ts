@@ -1,5 +1,5 @@
-"use server";
 
+"use server";
 import { revalidatePath } from "next/cache";
 import connectDB from "@/lib/mongodb";
 import { requireRole } from "@/lib/session";
@@ -19,6 +19,7 @@ import mongoose from "mongoose";
 import DoctorScheduleRequest from "@/models/DoctorScheduleRequest";
 import {
   findActiveAppointmentInSpecialty,
+  findPatientTimeConflict,
   type ActiveSpecialtyAppointment,
 } from "@/lib/booking-policy";
 import { notifyAdmins, notifyUser } from "@/lib/notification-service";
@@ -148,17 +149,31 @@ export async function getAvailableSlots(
     }
   }
 
-  // Patient availability is limited to the overlap. This does not modify
-  // the doctor's saved schedule.
   schedule = intersectSchedules(schedule, await getClinicHours());
 
   const taken = await bookedTimes(doctorId, date);
 
-  return {
-    slots: availableSlots(schedule, date, taken).filter(
-      (time) => !isPastClinicSlot(dateStr, time)
-    ),
-  };
+  const doctorSlots = availableSlots(schedule, date, taken).filter(
+    (time) => !isPastClinicSlot(dateStr, time)
+  );
+
+  // Exclude times that overlap another active appointment of this patient.
+  const patientAvailableSlots: string[] = [];
+
+  for (const time of doctorSlots) {
+    const conflict = await findPatientTimeConflict(
+      session.user.id,
+      date,
+      time,
+      appointmentId
+    );
+
+    if (!conflict) {
+      patientAvailableSlots.push(time);
+    }
+  }
+
+  return { slots: patientAvailableSlots };
 }
 
 /** Returns dates covered by approved leave or older status-less records. */
@@ -264,6 +279,21 @@ export async function bookAppointment(
     return { error: "This doctor is not accepting appointments" };
   }
 
+  // NEW: Prevent this patient from booking an overlapping appointment
+  // with any other doctor.
+  const timeConflict = await findPatientTimeConflict(
+    session.user.id,
+    date,
+    time
+  );
+
+  if (timeConflict) {
+    return {
+      error: `You already have an active appointment with Dr. ${timeConflict.doctorName} on ${timeConflict.date} at ${timeConflict.time}. Choose a different time.`,
+    };
+  }
+
+  // Keep the existing specialty booking policy.
   const existingAppointment = await findActiveAppointmentInSpecialty(
     session.user.id,
     doctor.specialty ?? ""
@@ -308,6 +338,19 @@ export async function bookAppointment(
   if (taken.has(time)) {
     return {
       error: "That slot was just taken. Please pick another time.",
+    };
+  }
+
+  // Recheck immediately before creating the appointment.
+  const latestTimeConflict = await findPatientTimeConflict(
+    session.user.id,
+    date,
+    time
+  );
+
+  if (latestTimeConflict) {
+    return {
+      error: `You already have an active appointment with Dr. ${latestTimeConflict.doctorName} on ${latestTimeConflict.date} at ${latestTimeConflict.time}. Choose a different time.`,
     };
   }
 

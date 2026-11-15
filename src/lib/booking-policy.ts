@@ -1,7 +1,9 @@
+
 import type { BookingSuggestion } from "@/app/(patient)/ai-chat/tools";
 import connectDB from "@/lib/mongodb";
 import Appointment from "@/models/Appointment";
 import Doctor from "@/models/Doctor";
+import { SLOT_MINUTES, toMinutes } from "@/lib/schedule";
 
 export type ToolContext = {
   mode: "patient" | "test";
@@ -78,4 +80,89 @@ export async function findActiveAppointmentInSpecialty(
     date: new Date(appointment.date).toISOString().slice(0, 10),
     time: appointment.time,
   };
+}
+
+export type PatientTimeConflict = {
+  doctorName: string;
+  date: string;
+  time: string;
+};
+
+/**
+ * Checks whether the patient already has an active appointment that overlaps
+ * the requested 30-minute appointment, regardless of the doctor.
+ *
+ * Blocking statuses:
+ * pending, confirmed, in-progress.
+ *
+ * Completed, cancelled and missed appointments do not block booking.
+ * Adjacent appointments are allowed.
+ */
+export async function findPatientTimeConflict(
+  patientId: string,
+  date: Date,
+  time: string,
+  excludeAppointmentId?: string,
+): Promise<PatientTimeConflict | null> {
+  const requestedStart = toMinutes(time);
+
+  if (!Number.isFinite(requestedStart)) {
+    return null;
+  }
+
+  const requestedEnd = requestedStart + SLOT_MINUTES;
+
+  const startOfDay = new Date(date);
+  startOfDay.setUTCHours(0, 0, 0, 0);
+
+  const endOfDay = new Date(startOfDay);
+  endOfDay.setUTCDate(endOfDay.getUTCDate() + 1);
+
+  await connectDB();
+
+  const appointments = await Appointment.find({
+    patient: patientId,
+    date: {
+      $gte: startOfDay,
+      $lt: endOfDay,
+    },
+    status: {
+      $in: ["pending", "confirmed", "in-progress"],
+    },
+    ...(excludeAppointmentId
+      ? { _id: { $ne: excludeAppointmentId } }
+      : {}),
+  })
+    .select("date time")
+    .populate("doctor", "name")
+    .sort({ time: 1 })
+    .lean();
+
+  for (const appointment of appointments) {
+    const existingStart = toMinutes(appointment.time);
+
+    if (!Number.isFinite(existingStart)) {
+      continue;
+    }
+
+    const existingEnd = existingStart + SLOT_MINUTES;
+
+    const overlaps =
+      requestedStart < existingEnd &&
+      existingStart < requestedEnd;
+
+    if (overlaps) {
+      const doctor = appointment.doctor as unknown as {
+        name?: string;
+      } | null;
+
+      return {
+        doctorName: doctor?.name ?? "another doctor",
+        date: new Date(appointment.date).toISOString().slice(0, 10),
+        time: appointment.time,
+      };
+    }
+  }
+
+  return null;
 }
