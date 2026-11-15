@@ -2,9 +2,23 @@
 import { Type, type FunctionDeclaration } from "@google/genai";
 import { isValidObjectId, Types } from "mongoose";
 import connectDB from "@/lib/mongodb";
-import { freeSlotsFor, parseDay } from "@/lib/slots-server";
+import {
+  CLINIC_TIME_ZONE,
+  dayBounds,
+  freeSlotsFor,
+  isPastClinicSlot,
+  parseDay,
+} from "@/lib/slots-server";
+import {
+  availableSlots,
+  intersectSchedules,
+  normalizeWeek,
+  type DayHours,
+} from "@/lib/schedule";
+import { getClinicHours } from "@/lib/clinic-hours";
 import { CONSULTATION_FEE } from "./chat-core";
 import Doctor from "@/models/Doctor";
+import DoctorLeave from "@/models/DoctorLeave";
 import Specialty from "@/models/Specialty";
 import Appointment from "@/models/Appointment";
 import { randomUUID } from "node:crypto";
@@ -91,6 +105,21 @@ export const functionDeclarations: FunctionDeclaration[] = [
         },
       },
       required: ["doctorId", "date"],
+    },
+  },
+  {
+    name: "find_nearest_available_appointment",
+    description:
+      "Use when a patient asks for the nearest or earliest appointment in a specialty, or says any doctor is fine. Search all active doctors in that specialty and return the actual earliest bookable date and time. This also prepares a Confirm booking card but never books without the patient confirming. Do not ask the patient to choose a doctor first.",
+    parameters: {
+      type: Type.OBJECT,
+      properties: {
+        specialty: {
+          type: Type.STRING,
+          description: "The exact specialty name from the clinic directory.",
+        },
+      },
+      required: ["specialty"],
     },
   },
   {
@@ -259,6 +288,187 @@ async function getAvailableSlots(args: { doctorId?: string; date?: string }) {
   if (result.error) return { error: result.error };
 
   return { date, slots: result.slots ?? [] };
+}
+
+/** Find the earliest live slot across every active doctor in a specialty. */
+async function findNearestAvailableAppointment(
+  args: { specialty?: string },
+  patientId: string,
+) {
+  const specialty = String(args.specialty ?? "").trim();
+  if (!specialty) return { result: { found: false, error: "Specialty is required." } };
+
+  const activeAppointment = await findActiveAppointmentInSpecialty(
+    patientId,
+    specialty,
+  );
+  if (activeAppointment) {
+    return {
+      result: { found: false, existingAppointment: activeAppointment },
+    };
+  }
+
+  await connectDB();
+  const doctors = await Doctor.find({
+    status: "active",
+    specialty: new RegExp(`^${escapeRegExp(specialty)}$`, "i"),
+  })
+    .select("name specialty schedule")
+    .lean();
+
+  if (doctors.length === 0) {
+    return {
+      result: {
+        found: false,
+        error: `No active doctors were found in ${specialty}.`,
+      },
+    };
+  }
+
+  const clinicSchedule = await getClinicHours();
+  const schedules = new Map<string, DayHours[]>();
+  for (const doctor of doctors) {
+    schedules.set(
+      String(doctor._id),
+      intersectSchedules(normalizeWeek(doctor.schedule), clinicSchedule),
+    );
+  }
+
+  const today = clinicDateString(new Date());
+  const start = parseDay(today);
+  if (!start) {
+    return { result: { found: false, error: "Could not determine today's date." } };
+  }
+
+  // Search the next year in one batch, then rank matching open slots in memory.
+  const searchEnd = new Date(start);
+  searchEnd.setUTCDate(searchEnd.getUTCDate() + 365);
+  const { start: rangeStart } = dayBounds(start);
+  const rangeEnd = searchEnd;
+  const doctorIds = doctors.map((doctor) => doctor._id);
+  const [appointments, leaves] = await Promise.all([
+    Appointment.find({
+      doctor: { $in: doctorIds },
+      date: { $gte: rangeStart, $lt: rangeEnd },
+      status: { $ne: "cancelled" },
+    })
+      .select("doctor date time")
+      .lean(),
+    DoctorLeave.find({
+      doctor: { $in: doctorIds },
+      startDate: { $lt: rangeEnd },
+      endDate: { $gt: rangeStart },
+      $or: [
+        { status: "approved" },
+        // Older Admin-created leaves may not have a status field.
+        { status: { $exists: false } },
+      ],
+    })
+      .select("doctor startDate endDate")
+      .lean(),
+  ]);
+
+  const bookedByDoctorAndDay = new Map<string, Set<string>>();
+  for (const appointment of appointments) {
+    const key = `${String(appointment.doctor)}:${new Date(appointment.date).toISOString().slice(0, 10)}`;
+    const times = bookedByDoctorAndDay.get(key) ?? new Set<string>();
+    times.add(appointment.time);
+    bookedByDoctorAndDay.set(key, times);
+  }
+
+  const leavesByDoctor = new Map<
+    string,
+    Array<{ startDate: Date; endDate: Date }>
+  >();
+  for (const leave of leaves) {
+    const doctorId = String(leave.doctor);
+    const doctorLeaves = leavesByDoctor.get(doctorId) ?? [];
+    doctorLeaves.push({ startDate: leave.startDate, endDate: leave.endDate });
+    leavesByDoctor.set(doctorId, doctorLeaves);
+  }
+
+  for (let offset = 0; offset < 365; offset += 1) {
+    const date = new Date(start);
+    date.setUTCDate(date.getUTCDate() + offset);
+    const dateString = date.toISOString().slice(0, 10);
+    const { start: dayStart, end: dayEnd } = dayBounds(date);
+    const candidates: Array<{
+      doctorId: string;
+      doctorName: string;
+      specialty: string;
+      date: string;
+      time: string;
+    }> = [];
+
+    for (const doctor of doctors) {
+      const doctorId = String(doctor._id);
+      const schedule = schedules.get(doctorId) ?? [];
+      const isOnLeave = (leavesByDoctor.get(doctorId) ?? []).some(
+        (leave) => leave.startDate < dayEnd && leave.endDate > dayStart,
+      );
+      if (isOnLeave) continue;
+
+      const key = `${doctorId}:${dateString}`;
+      const slots = availableSlots(
+        schedule,
+        date,
+        bookedByDoctorAndDay.get(key) ?? new Set<string>(),
+      ).filter((time) => !isPastClinicSlot(dateString, time));
+
+      for (const time of slots) {
+        candidates.push({
+          doctorId,
+          doctorName: doctor.name,
+          specialty: doctor.specialty,
+          date: dateString,
+          time,
+        });
+      }
+    }
+
+    const candidateTimes = Array.from(
+      new Set(candidates.map((candidate) => candidate.time)),
+    ).sort();
+
+    for (const time of candidateTimes) {
+      // A patient cannot hold overlapping appointments with different doctors.
+      if (await findPatientTimeConflict(patientId, date, time)) continue;
+
+      const nearest = candidates
+        .filter((candidate) => candidate.time === time)
+        .sort((left, right) => left.doctorName.localeCompare(right.doctorName))[0];
+      if (!nearest) continue;
+
+      const suggestion: BookingSuggestion = {
+        proposalId: randomUUID(),
+        ...nearest,
+      };
+      return {
+        result: { found: true, appointment: nearest },
+        suggestion,
+      };
+    }
+  }
+
+  return {
+    result: {
+      found: false,
+      error: `No bookable appointments were found in ${specialty} during the next 12 months.`,
+    },
+  };
+}
+
+function clinicDateString(now: Date): string {
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone: CLINIC_TIME_ZONE,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).formatToParts(now);
+  const values = Object.fromEntries(
+    parts.map(({ type, value }) => [type, value]),
+  );
+  return `${values.year}-${values.month}-${values.day}`;
 }
 
 type AppointmentFilter =
@@ -693,7 +903,8 @@ export async function runTool(
 
     case "get_available_slots":
       return { result: await getAvailableSlots(args) };
-
+    case "find_nearest_available_appointment":
+      return findNearestAvailableAppointment(args, patientId);
     case "propose_booking": {
       const res = await proposeBooking(args, patientId);
 

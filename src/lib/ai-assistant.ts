@@ -67,28 +67,41 @@ export async function runAssistant(
   let knowledgeHits = 0;
 
   for (let round = 0; round <= MAX_TOOL_ROUNDS; round++) {
-    const response = await dependencies.generate({
-      model: GEMINI_MODEL,
-      contents,
-      config: {
-        systemInstruction: systemInstruction(today, options.responseLanguage),
-        ...(round < MAX_TOOL_ROUNDS
-          ? { tools: [{ functionDeclarations }] }
-          : {}),
-      },
-    });
+    let response: AsyncGenerator<GenerateContentResponse>;
+    try {
+      response = await dependencies.generate({
+        model: GEMINI_MODEL,
+        contents,
+        config: {
+          systemInstruction: systemInstruction(today, options.responseLanguage),
+          ...(round < MAX_TOOL_ROUNDS
+            ? { tools: [{ functionDeclarations }] }
+            : {}),
+        },
+      });
+    } catch (error) {
+      throw new Error(`Gemini request failed: ${errorMessage(error)}`, {
+        cause: error,
+      });
+    }
     const parts: Part[] = [];
-    for await (const chunk of response) {
-      const content = chunk.candidates?.[0]?.content;
-      if (content?.parts) parts.push(...content.parts);
-      const delta = content?.parts
-        ?.filter((part) => !part.thought)
-        .map((part) => part.text ?? "")
-        .join("");
-      if (delta) {
-        text += delta;
-        options.onEvent?.({ type: "delta", text: delta });
+    try {
+      for await (const chunk of response) {
+        const content = chunk.candidates?.[0]?.content;
+        if (content?.parts) parts.push(...content.parts);
+        const delta = content?.parts
+          ?.filter((part) => !part.thought)
+          .map((part) => part.text ?? "")
+          .join("");
+        if (delta) {
+          text += delta;
+          options.onEvent?.({ type: "delta", text: delta });
+        }
       }
+    } catch (error) {
+      throw new Error(`Gemini response stream failed: ${errorMessage(error)}`, {
+        cause: error,
+      });
     }
     const calls = parts.flatMap((part) =>
       part.functionCall ? [part.functionCall] : [],
@@ -100,18 +113,25 @@ export async function runAssistant(
     for (const call of calls) {
       const name = call.name ?? "";
       toolCalls.push(name);
-      const result = await dependencies.executeTool(
-        name,
-        (call.args ?? {}) as Record<string, unknown>,
-        options.patientId,
-        {
-          mode: options.mode,
-          knowledgeMode:
-            options.mode === "test"
-              ? (options.knowledgeMode ?? "draft")
-              : "published",
-        },
-      );
+      let result: Awaited<ReturnType<typeof dependencies.executeTool>>;
+      try {
+        result = await dependencies.executeTool(
+          name,
+          (call.args ?? {}) as Record<string, unknown>,
+          options.patientId,
+          {
+            mode: options.mode,
+            knowledgeMode:
+              options.mode === "test"
+                ? (options.knowledgeMode ?? "draft")
+                : "published",
+          },
+        );
+      } catch (error) {
+        throw new Error(`AI tool "${name}" failed: ${errorMessage(error)}`, {
+          cause: error,
+        });
+      }
       if (name === "search_clinic_knowledge") {
         const hits = (result.result as { sources: KnowledgeHit[] }).sources;
         knowledgeSearches++;
@@ -155,4 +175,8 @@ export async function runAssistant(
     knowledgeSearches,
     knowledgeHits,
   };
+}
+
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
 }

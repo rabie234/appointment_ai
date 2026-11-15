@@ -120,6 +120,7 @@ export async function POST(req: NextRequest) {
       let knowledgeSearches = 0;
       let knowledgeHits = 0;
       let createdBooking: BookingConfirmation | undefined;
+      let failureStage = approvedBooking ? "booking confirmation" : "AI response";
       try {
         let text: string;
         let suggestion: BookingSuggestion | undefined;
@@ -218,6 +219,7 @@ export async function POST(req: NextRequest) {
           knowledgeSearches = result.knowledgeSearches;
           knowledgeHits = result.knowledgeHits;
         }
+        failureStage = "saving conversation";
         const saved = await persist({
           patientId,
           conversationId: (conversationId as string | null) ?? null,
@@ -232,7 +234,7 @@ export async function POST(req: NextRequest) {
         success = true;
         send({ type: "done", ...saved });
       } catch (error) {
-        console.error("AI chat failed:", error);
+        console.error(`AI chat failed during ${failureStage}:`, error);
         send({
           type: "error",
           message: createdBooking
